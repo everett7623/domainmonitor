@@ -346,6 +346,17 @@ class DomainMonitor:
     def run(self):
         """运行监控"""
         logging.info("域名监控服务启动")
+        logging.info(f"检查间隔: {self.config.get('check_interval', 60)} 分钟")
+        
+        # 发送启动通知
+        if self.config.get('telegram', {}).get('bot_token'):
+            start_message = (
+                "<b>✅ 域名监控系统已启动</b>\n\n"
+                f"监控域名数: {len(self.load_domains())} 个\n"
+                f"检查间隔: {self.config.get('check_interval', 60)} 分钟\n"
+                f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            self.send_telegram_notification(start_message)
         
         # 立即执行一次检查
         self.check_all_domains()
@@ -353,7 +364,15 @@ class DomainMonitor:
         # 设置定时任务
         schedule.every(self.config.get('check_interval', 60)).minutes.do(self.check_all_domains)
         
+        # 主循环
+        check_now_file = '/opt/domainmonitor/check_now'
         while True:
+            # 检查是否需要立即执行
+            if os.path.exists(check_now_file):
+                os.remove(check_now_file)
+                logging.info("检测到立即检查请求")
+                self.check_all_domains()
+                
             schedule.run_pending()
             time.sleep(1)
 

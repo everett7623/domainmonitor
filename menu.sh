@@ -1,592 +1,312 @@
-#!/bin/bash
+#!/usr/bin/env python3
+"""
+域名监控服务 - 交互式菜单
+简单易用的一键管理系统
+"""
 
-# 域名监控服务 - 交互式管理菜单
-# 提供友好的菜单界面管理所有功能
+import os
+import sys
+import json
+import subprocess
+import time
+from datetime import datetime
 
 # 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
+RED = '\033[0;31m'
+GREEN = '\033[0;32m'
+YELLOW = '\033[1;33m'
+BLUE = '\033[0;34m'
+CYAN = '\033[0;36m'
+NC = '\033[0m'  # No Color
+BOLD = '\033[1m'
 
-# 配置
-PROJECT_DIR="/opt/domain-monitor"
-CONFIG_FILE="$PROJECT_DIR/config.env"
-DOMAINS_FILE="$PROJECT_DIR/domains.json"
-LOG_FILE="/var/log/domain-monitor.log"
-
-# 检查是否在正确的目录
-check_directory() {
-    if [ ! -d "$PROJECT_DIR" ]; then
-        echo -e "${RED}错误：项目目录不存在！${NC}"
-        echo "请先运行部署脚本：./deploy.sh"
-        exit 1
-    fi
-    cd "$PROJECT_DIR"
-}
-
-# 显示标题
-show_header() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}${BLUE}                         域名监控服务管理系统 v1.0                          ${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-}
-
-# 显示服务状态
-show_status() {
-    echo -e "${YELLOW}服务状态：${NC}"
-    if sudo supervisorctl status domain-monitor 2>/dev/null | grep -q "RUNNING"; then
-        echo -e "${GREEN}● 域名监控服务正在运行${NC}"
-        local uptime=$(sudo supervisorctl status domain-monitor | awk '{print $5, $6}')
-        echo -e "  运行时间：$uptime"
-    else
-        echo -e "${RED}● 域名监控服务已停止${NC}"
-    fi
+class DomainMonitorMenu:
+    def __init__(self):
+        self.config_file = 'config.json'
+        self.load_config()
+        
+    def load_config(self):
+        """加载配置"""
+        if os.path.exists(self.config_file):
+            with open(self.config_file, 'r') as f:
+                self.config = json.load(f)
+        else:
+            self.config = {
+                'telegram_bot_token': '',
+                'telegram_chat_id': '',
+                'check_interval_minutes': 60,
+                'domains': {}
+            }
     
-    # 显示配置状态
-    if [ -f "$CONFIG_FILE" ]; then
-        echo -e "${GREEN}● 配置文件已设置${NC}"
-    else
-        echo -e "${RED}● 配置文件未设置${NC}"
-    fi
+    def save_config(self):
+        """保存配置"""
+        with open(self.config_file, 'w') as f:
+            json.dump(self.config, f, ensure_ascii=False, indent=2)
+        os.chmod(self.config_file, 0o600)
     
-    # 显示监控域名数量
-    if [ -f "$DOMAINS_FILE" ]; then
-        local domain_count=$(python3 -c "import json; print(len(json.load(open('$DOMAINS_FILE'))))" 2>/dev/null || echo "0")
-        echo -e "${BLUE}● 监控域名数量：${domain_count}${NC}"
-    fi
-    echo ""
-}
-
-# 主菜单
-show_main_menu() {
-    echo -e "${BOLD}主菜单：${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  ${BOLD}1)${NC} 🚀 快速开始（配置向导）"
-    echo -e "  ${BOLD}2)${NC} 📋 域名管理"
-    echo -e "  ${BOLD}3)${NC} ⚙️  服务控制"
-    echo -e "  ${BOLD}4)${NC} 📊 查看日志"
-    echo -e "  ${BOLD}5)${NC} 🔧 系统设置"
-    echo -e "  ${BOLD}6)${NC} 📈 统计信息"
-    echo -e "  ${BOLD}0)${NC} 退出"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-}
-
-# 快速开始向导
-quick_start() {
-    show_header
-    echo -e "${BOLD}${GREEN}快速开始向导${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    def clear_screen(self):
+        """清屏"""
+        os.system('clear' if os.name == 'posix' else 'cls')
     
-    # 检查配置
-    if [ ! -f "$CONFIG_FILE" ]; then
-        echo -e "${YELLOW}首次使用，需要配置 Telegram Bot${NC}"
-        echo ""
-        configure_telegram
-    else
-        echo -e "${GREEN}✓ Telegram 已配置${NC}"
-    fi
+    def print_header(self):
+        """打印标题"""
+        self.clear_screen()
+        print(f"{CYAN}{'='*60}{NC}")
+        print(f"{BOLD}{BLUE}           域名监控服务 - 简单管理菜单{NC}")
+        print(f"{CYAN}{'='*60}{NC}\n")
     
-    # 添加域名
-    echo ""
-    echo -e "${YELLOW}添加要监控的域名：${NC}"
-    read -p "请输入域名（如 example.com）: " domain
-    if [ ! -z "$domain" ]; then
-        read -p "添加备注（可选）: " notes
-        ./manage.sh add "$domain" "$notes"
-        echo -e "${GREEN}✓ 域名已添加${NC}"
-    fi
-    
-    # 启动服务
-    echo ""
-    read -p "是否立即启动监控服务？(y/n): " start_now
-    if [[ "$start_now" =~ ^[Yy]$ ]]; then
-        sudo supervisorctl start domain-monitor 2>/dev/null
-        echo -e "${GREEN}✓ 服务已启动${NC}"
-    fi
-    
-    echo ""
-    read -p "按回车键返回主菜单..."
-}
-
-# 配置 Telegram
-configure_telegram() {
-    echo -e "${BOLD}配置 Telegram Bot${NC}"
-    echo ""
-    echo -e "${CYAN}获取 Bot Token 的步骤：${NC}"
-    echo "1. 在 Telegram 中搜索 @BotFather"
-    echo "2. 发送 /newbot 创建新机器人"
-    echo "3. 复制生成的 Token"
-    echo ""
-    
-    read -p "请输入 Bot Token: " bot_token
-    while [ -z "$bot_token" ]; do
-        echo -e "${RED}Token 不能为空！${NC}"
-        read -p "请输入 Bot Token: " bot_token
-    done
-    
-    echo ""
-    echo -e "${CYAN}获取 Chat ID 的步骤：${NC}"
-    echo "1. 给你的 Bot 发送任意消息"
-    echo "2. 访问: https://api.telegram.org/bot${bot_token}/getUpdates"
-    echo "3. 找到 chat.id 的值"
-    echo ""
-    
-    read -p "请输入 Chat ID: " chat_id
-    while [ -z "$chat_id" ]; do
-        echo -e "${RED}Chat ID 不能为空！${NC}"
-        read -p "请输入 Chat ID: " chat_id
-    done
-    
-    read -p "检查间隔（分钟，默认60）: " interval
-    if [ -z "$interval" ]; then
-        interval=60
-    fi
-    
-    # 保存配置
-    cat > "$CONFIG_FILE" << EOF
-TELEGRAM_BOT_TOKEN=$bot_token
-TELEGRAM_CHAT_ID=$chat_id
-CHECK_INTERVAL_MINUTES=$interval
-EOF
-    chmod 600 "$CONFIG_FILE"
-    
-    echo -e "${GREEN}✓ 配置已保存${NC}"
-}
-
-# 域名管理菜单
-domain_management() {
-    while true; do
-        show_header
-        echo -e "${BOLD}${BLUE}域名管理${NC}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    def print_status(self):
+        """显示状态"""
+        # Telegram 配置状态
+        if self.config['telegram_bot_token'] and self.config['telegram_chat_id']:
+            print(f"{GREEN}● Telegram 已配置{NC}")
+        else:
+            print(f"{RED}● Telegram 未配置{NC}")
         
-        # 显示当前域名列表
-        echo -e "${YELLOW}当前监控的域名：${NC}"
-        if [ -f "$DOMAINS_FILE" ] && [ -s "$DOMAINS_FILE" ]; then
-            python3 -c "
-import json
-from datetime import datetime
-
-with open('$DOMAINS_FILE', 'r') as f:
-    domains = json.load(f)
-
-if not domains:
-    print('  (暂无域名)')
-else:
-    print(f'{'域名':<30} {'状态':<15} {'最后检查':<20} {'备注':<30}')
-    print('-' * 95)
-    for domain, info in domains.items():
-        status = info.get('status', '未知')
-        if status == 'available':
-            status = '\033[32m可注册\033[0m'
-        elif status == 'registered':
-            status = '\033[31m已注册\033[0m'
-        
-        last_check = info.get('last_checked', '从未检查')
-        if last_check != '从未检查':
-            try:
-                dt = datetime.fromisoformat(last_check.replace('Z', '+00:00'))
-                last_check = dt.strftime('%Y-%m-%d %H:%M')
-            except:
-                pass
-        
-        notes = info.get('notes', '')[:30]
-        print(f'{domain:<30} {status:<24} {last_check:<20} {notes:<30}')
-"
-        else
-            echo "  (暂无域名)"
-        fi
-        
-        echo ""
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "  ${BOLD}1)${NC} ➕ 添加域名"
-        echo -e "  ${BOLD}2)${NC} ➖ 删除域名"
-        echo -e "  ${BOLD}3)${NC} 📝 批量添加域名"
-        echo -e "  ${BOLD}4)${NC} 🔍 立即检查所有域名"
-        echo -e "  ${BOLD}5)${NC} 📤 导出域名列表"
-        echo -e "  ${BOLD}0)${NC} 返回主菜单"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        read -p "请选择操作 [0-5]: " choice
-        
-        case $choice in
-            1)
-                echo ""
-                read -p "请输入要添加的域名: " domain
-                if [ ! -z "$domain" ]; then
-                    read -p "添加备注（可选）: " notes
-                    ./manage.sh add "$domain" "$notes"
-                    echo -e "${GREEN}✓ 域名已添加${NC}"
-                    sleep 2
-                fi
-                ;;
-            2)
-                echo ""
-                read -p "请输入要删除的域名: " domain
-                if [ ! -z "$domain" ]; then
-                    ./manage.sh remove "$domain"
-                    echo -e "${GREEN}✓ 域名已删除${NC}"
-                    sleep 2
-                fi
-                ;;
-            3)
-                echo ""
-                echo "批量添加域名（每行一个域名，输入空行结束）："
-                while true; do
-                    read -p "> " domain
-                    if [ -z "$domain" ]; then
-                        break
-                    fi
-                    ./manage.sh add "$domain" "批量添加"
-                done
-                echo -e "${GREEN}✓ 批量添加完成${NC}"
-                sleep 2
-                ;;
-            4)
-                echo ""
-                echo -e "${YELLOW}正在检查所有域名...${NC}"
-                ./manage.sh check
-                echo -e "${GREEN}✓ 检查完成${NC}"
-                read -p "按回车键继续..."
-                ;;
-            5)
-                echo ""
-                timestamp=$(date +%Y%m%d_%H%M%S)
-                export_file="domains_export_${timestamp}.txt"
-                python3 -c "
-import json
-with open('$DOMAINS_FILE', 'r') as f:
-    domains = json.load(f)
-with open('$export_file', 'w') as f:
-    for domain in domains:
-        f.write(domain + '\n')
-"
-                echo -e "${GREEN}✓ 域名列表已导出到：$export_file${NC}"
-                read -p "按回车键继续..."
-                ;;
-            0)
-                return
-                ;;
-            *)
-                echo -e "${RED}无效选择${NC}"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
-# 服务控制菜单
-service_control() {
-    while true; do
-        show_header
-        echo -e "${BOLD}${BLUE}服务控制${NC}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        # 显示当前状态
-        show_status
-        
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "  ${BOLD}1)${NC} ▶️  启动服务"
-        echo -e "  ${BOLD}2)${NC} ⏸️  停止服务"
-        echo -e "  ${BOLD}3)${NC} 🔄 重启服务"
-        echo -e "  ${BOLD}4)${NC} 📊 查看详细状态"
-        echo -e "  ${BOLD}0)${NC} 返回主菜单"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        read -p "请选择操作 [0-4]: " choice
-        
-        case $choice in
-            1)
-                echo ""
-                sudo supervisorctl start domain-monitor
-                echo -e "${GREEN}✓ 服务启动命令已执行${NC}"
-                sleep 2
-                ;;
-            2)
-                echo ""
-                sudo supervisorctl stop domain-monitor
-                echo -e "${YELLOW}✓ 服务停止命令已执行${NC}"
-                sleep 2
-                ;;
-            3)
-                echo ""
-                sudo supervisorctl restart domain-monitor
-                echo -e "${GREEN}✓ 服务重启命令已执行${NC}"
-                sleep 2
-                ;;
-            4)
-                echo ""
-                sudo supervisorctl status domain-monitor
-                echo ""
-                read -p "按回车键继续..."
-                ;;
-            0)
-                return
-                ;;
-            *)
-                echo -e "${RED}无效选择${NC}"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
-# 查看日志
-view_logs() {
-    while true; do
-        show_header
-        echo -e "${BOLD}${BLUE}日志查看${NC}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "  ${BOLD}1)${NC} 📜 查看最新日志（最后50行）"
-        echo -e "  ${BOLD}2)${NC} 🔄 实时查看日志"
-        echo -e "  ${BOLD}3)${NC} 🔍 搜索日志"
-        echo -e "  ${BOLD}4)${NC} 📊 查看错误日志"
-        echo -e "  ${BOLD}5)${NC} 🗑️  清空日志"
-        echo -e "  ${BOLD}0)${NC} 返回主菜单"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        read -p "请选择操作 [0-5]: " choice
-        
-        case $choice in
-            1)
-                echo ""
-                echo -e "${YELLOW}最新日志（最后50行）：${NC}"
-                echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                sudo tail -n 50 "$LOG_FILE"
-                echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                read -p "按回车键继续..."
-                ;;
-            2)
-                echo ""
-                echo -e "${YELLOW}实时日志查看（按 Ctrl+C 退出）：${NC}"
-                sudo tail -f "$LOG_FILE"
-                ;;
-            3)
-                echo ""
-                read -p "请输入要搜索的关键词: " keyword
-                if [ ! -z "$keyword" ]; then
-                    echo -e "${YELLOW}搜索结果：${NC}"
-                    sudo grep -i "$keyword" "$LOG_FILE" | tail -n 20
-                    read -p "按回车键继续..."
-                fi
-                ;;
-            4)
-                echo ""
-                echo -e "${YELLOW}错误日志：${NC}"
-                echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                sudo grep -E "(ERROR|error|Error)" "$LOG_FILE" | tail -n 30
-                echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                read -p "按回车键继续..."
-                ;;
-            5)
-                echo ""
-                read -p "确定要清空日志吗？(y/n): " confirm
-                if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                    sudo truncate -s 0 "$LOG_FILE"
-                    echo -e "${GREEN}✓ 日志已清空${NC}"
-                fi
-                sleep 2
-                ;;
-            0)
-                return
-                ;;
-            *)
-                echo -e "${RED}无效选择${NC}"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
-# 系统设置
-system_settings() {
-    while true; do
-        show_header
-        echo -e "${BOLD}${BLUE}系统设置${NC}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        # 显示当前配置
-        if [ -f "$CONFIG_FILE" ]; then
-            echo -e "${YELLOW}当前配置：${NC}"
-            source "$CONFIG_FILE"
-            echo "  Bot Token: ${TELEGRAM_BOT_TOKEN:0:20}..."
-            echo "  Chat ID: $TELEGRAM_CHAT_ID"
-            echo "  检查间隔: $CHECK_INTERVAL_MINUTES 分钟"
-        else
-            echo -e "${RED}配置文件不存在${NC}"
-        fi
-        
-        echo ""
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "  ${BOLD}1)${NC} 🔧 修改 Telegram 配置"
-        echo -e "  ${BOLD}2)${NC} ⏱️  修改检查间隔"
-        echo -e "  ${BOLD}3)${NC} 🔐 查看完整配置"
-        echo -e "  ${BOLD}4)${NC} 💾 备份配置"
-        echo -e "  ${BOLD}5)${NC} 📥 恢复配置"
-        echo -e "  ${BOLD}0)${NC} 返回主菜单"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        read -p "请选择操作 [0-5]: " choice
-        
-        case $choice in
-            1)
-                echo ""
-                configure_telegram
-                echo -e "${YELLOW}需要重启服务才能生效${NC}"
-                read -p "是否立即重启服务？(y/n): " restart
-                if [[ "$restart" =~ ^[Yy]$ ]]; then
-                    sudo supervisorctl restart domain-monitor
-                fi
-                ;;
-            2)
-                echo ""
-                source "$CONFIG_FILE"
-                echo "当前检查间隔：$CHECK_INTERVAL_MINUTES 分钟"
-                read -p "请输入新的检查间隔（分钟）: " new_interval
-                if [ ! -z "$new_interval" ]; then
-                    sed -i "s/CHECK_INTERVAL_MINUTES=.*/CHECK_INTERVAL_MINUTES=$new_interval/" "$CONFIG_FILE"
-                    echo -e "${GREEN}✓ 检查间隔已更新${NC}"
-                    echo -e "${YELLOW}需要重启服务才能生效${NC}"
-                fi
-                sleep 2
-                ;;
-            3)
-                echo ""
-                echo -e "${YELLOW}完整配置内容：${NC}"
-                echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                cat "$CONFIG_FILE"
-                echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                read -p "按回车键继续..."
-                ;;
-            4)
-                echo ""
-                timestamp=$(date +%Y%m%d_%H%M%S)
-                backup_dir="backup_${timestamp}"
-                mkdir -p "$backup_dir"
-                cp "$CONFIG_FILE" "$backup_dir/"
-                cp "$DOMAINS_FILE" "$backup_dir/"
-                echo -e "${GREEN}✓ 配置已备份到：$backup_dir${NC}"
-                read -p "按回车键继续..."
-                ;;
-            5)
-                echo ""
-                echo "可用的备份："
-                ls -d backup_* 2>/dev/null || echo "  (没有备份)"
-                read -p "请输入要恢复的备份目录名: " backup_dir
-                if [ -d "$backup_dir" ]; then
-                    cp "$backup_dir"/* .
-                    echo -e "${GREEN}✓ 配置已恢复${NC}"
-                else
-                    echo -e "${RED}备份目录不存在${NC}"
-                fi
-                sleep 2
-                ;;
-            0)
-                return
-                ;;
-            *)
-                echo -e "${RED}无效选择${NC}"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
-# 统计信息
-show_statistics() {
-    show_header
-    echo -e "${BOLD}${BLUE}统计信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    if [ -f "$DOMAINS_FILE" ]; then
-        python3 -c "
-import json
-from datetime import datetime
-
-with open('$DOMAINS_FILE', 'r') as f:
-    domains = json.load(f)
-
-total = len(domains)
-available = sum(1 for d in domains.values() if d.get('status') == 'available')
-registered = sum(1 for d in domains.values() if d.get('status') == 'registered')
-unknown = total - available - registered
-
-print(f'总监控域名数: {total}')
-print(f'可注册域名数: {available}')
-print(f'已注册域名数: {registered}')
-print(f'未知状态域名: {unknown}')
-print('')
-
-# 最近检查的域名
-recent = []
-for domain, info in domains.items():
-    if info.get('last_checked'):
+        # 服务状态
         try:
-            dt = datetime.fromisoformat(info['last_checked'].replace('Z', '+00:00'))
-            recent.append((domain, dt))
+            result = subprocess.run(['supervisorctl', 'status', 'domain-monitor'], 
+                                  capture_output=True, text=True)
+            if 'RUNNING' in result.stdout:
+                print(f"{GREEN}● 监控服务运行中{NC}")
+            else:
+                print(f"{RED}● 监控服务已停止{NC}")
         except:
-            pass
-
-if recent:
-    recent.sort(key=lambda x: x[1], reverse=True)
-    print('最近检查的域名:')
-    for domain, dt in recent[:5]:
-        print(f'  {domain} - {dt.strftime(\"%Y-%m-%d %H:%M\")}')
-"
-    else
-        echo "暂无统计数据"
-    fi
-    
-    echo ""
-    # 日志统计
-    if [ -f "$LOG_FILE" ]; then
-        echo -e "${YELLOW}日志统计：${NC}"
-        echo "  日志文件大小: $(du -h "$LOG_FILE" | cut -f1)"
-        echo "  总行数: $(wc -l < "$LOG_FILE")"
-        echo "  错误数: $(grep -c ERROR "$LOG_FILE" 2>/dev/null || echo 0)"
-    fi
-    
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    read -p "按回车键返回主菜单..."
-}
-
-# 主循环
-main() {
-    check_directory
-    
-    while true; do
-        show_header
-        show_status
-        show_main_menu
+            print(f"{YELLOW}● 服务状态未知{NC}")
         
-        read -p "请选择操作 [0-6]: " choice
+        # 域名数量
+        domain_count = len(self.config.get('domains', {}))
+        print(f"{BLUE}● 监控域名数量：{domain_count}{NC}\n")
+    
+    def configure_telegram(self):
+        """配置 Telegram"""
+        self.print_header()
+        print(f"{YELLOW}配置 Telegram Bot{NC}\n")
         
-        case $choice in
-            1) quick_start ;;
-            2) domain_management ;;
-            3) service_control ;;
-            4) view_logs ;;
-            5) system_settings ;;
-            6) show_statistics ;;
-            0)
-                echo ""
-                echo -e "${GREEN}感谢使用域名监控服务！${NC}"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}无效选择，请重新输入${NC}"
-                sleep 1
-                ;;
-        esac
-    done
-}
+        print("获取 Bot Token:")
+        print("1. Telegram 搜索 @BotFather")
+        print("2. 发送 /newbot 创建机器人")
+        print("3. 复制 Token\n")
+        
+        token = input("Bot Token: ").strip()
+        if not token:
+            print(f"{RED}Token 不能为空！{NC}")
+            time.sleep(2)
+            return
+        
+        print("\n获取 Chat ID:")
+        print("1. 给 Bot 发送消息")
+        print(f"2. 访问: https://api.telegram.org/bot{token}/getUpdates")
+        print("3. 找到 chat.id 的值\n")
+        
+        chat_id = input("Chat ID: ").strip()
+        if not chat_id:
+            print(f"{RED}Chat ID 不能为空！{NC}")
+            time.sleep(2)
+            return
+        
+        # 验证配置
+        import requests
+        print(f"\n{YELLOW}验证配置...{NC}")
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            response = requests.post(url, data={
+                'chat_id': chat_id,
+                'text': '✅ 域名监控配置成功！',
+                'parse_mode': 'HTML'
+            })
+            
+            if response.json().get('ok'):
+                self.config['telegram_bot_token'] = token
+                self.config['telegram_chat_id'] = chat_id
+                self.save_config()
+                print(f"{GREEN}✓ 配置成功！{NC}")
+            else:
+                print(f"{RED}✗ 配置失败，请检查 Token 和 Chat ID{NC}")
+        except Exception as e:
+            print(f"{RED}✗ 验证失败: {e}{NC}")
+        
+        input("\n按回车返回...")
+    
+    def manage_domains(self):
+        """域名管理"""
+        while True:
+            self.print_header()
+            print(f"{YELLOW}域名管理{NC}\n")
+            
+            # 显示当前域名
+            domains = self.config.get('domains', {})
+            if domains:
+                print("当前监控的域名:")
+                print("-" * 50)
+                for domain, info in domains.items():
+                    status = info.get('status', '未知')
+                    if status == 'available':
+                        status = f"{GREEN}可注册{NC}"
+                    elif status == 'registered':
+                        status = f"{RED}已注册{NC}"
+                    
+                    print(f"• {domain:<30} {status}")
+                    if info.get('notes'):
+                        print(f"  备注: {info['notes']}")
+                print("-" * 50)
+            else:
+                print("暂无监控的域名")
+            
+            print(f"\n{CYAN}操作选项：{NC}")
+            print("1. 添加域名")
+            print("2. 删除域名")
+            print("3. 立即检查所有域名")
+            print("0. 返回主菜单")
+            
+            choice = input("\n请选择 [0-3]: ").strip()
+            
+            if choice == '1':
+                domain = input("\n域名: ").strip().lower()
+                if domain and '.' in domain:
+                    notes = input("备注 (可选): ").strip()
+                    self.config['domains'][domain] = {
+                        'added_at': datetime.now().isoformat(),
+                        'status': 'unknown',
+                        'notes': notes,
+                        'notified': False
+                    }
+                    self.save_config()
+                    print(f"{GREEN}✓ 已添加: {domain}{NC}")
+                    time.sleep(1)
+                
+            elif choice == '2':
+                domain = input("\n要删除的域名: ").strip().lower()
+                if domain in self.config['domains']:
+                    del self.config['domains'][domain]
+                    self.save_config()
+                    print(f"{GREEN}✓ 已删除: {domain}{NC}")
+                else:
+                    print(f"{RED}域名不存在{NC}")
+                time.sleep(1)
+                
+            elif choice == '3':
+                print(f"\n{YELLOW}正在检查所有域名...{NC}")
+                os.system('cd /opt/domain-monitor && source venv/bin/activate && python3 -c "from domain_monitor import DomainMonitor; m = DomainMonitor(); m.check_all_domains()"')
+                input("\n按回车继续...")
+                
+            elif choice == '0':
+                break
+    
+    def service_control(self):
+        """服务控制"""
+        self.print_header()
+        print(f"{YELLOW}服务控制{NC}\n")
+        
+        print("1. 启动服务")
+        print("2. 停止服务")
+        print("3. 重启服务")
+        print("4. 查看日志")
+        print("0. 返回")
+        
+        choice = input("\n请选择 [0-4]: ").strip()
+        
+        if choice == '1':
+            os.system('supervisorctl start domain-monitor')
+            print(f"{GREEN}✓ 启动命令已执行{NC}")
+        elif choice == '2':
+            os.system('supervisorctl stop domain-monitor')
+            print(f"{YELLOW}✓ 停止命令已执行{NC}")
+        elif choice == '3':
+            os.system('supervisorctl restart domain-monitor')
+            print(f"{GREEN}✓ 重启命令已执行{NC}")
+        elif choice == '4':
+            print(f"\n{YELLOW}最新日志 (Ctrl+C 退出):{NC}\n")
+            os.system('tail -f /var/log/domain-monitor.log')
+        
+        if choice in ['1', '2', '3']:
+            time.sleep(2)
+    
+    def quick_start(self):
+        """快速开始向导"""
+        self.print_header()
+        print(f"{GREEN}快速开始向导{NC}\n")
+        
+        # 1. 配置 Telegram
+        if not self.config['telegram_bot_token']:
+            print("第一步：配置 Telegram")
+            input("按回车继续...")
+            self.configure_telegram()
+        
+        # 2. 添加域名
+        if not self.config.get('domains'):
+            self.print_header()
+            print("第二步：添加要监控的域名\n")
+            
+            while True:
+                domain = input("域名 (直接回车结束): ").strip().lower()
+                if not domain:
+                    break
+                if '.' in domain:
+                    self.config['domains'][domain] = {
+                        'added_at': datetime.now().isoformat(),
+                        'status': 'unknown',
+                        'notes': '',
+                        'notified': False
+                    }
+                    print(f"{GREEN}✓ 已添加: {domain}{NC}")
+            
+            self.save_config()
+        
+        # 3. 启动服务
+        self.print_header()
+        print("第三步：启动监控服务\n")
+        
+        if input("是否立即启动服务? (y/n): ").lower() == 'y':
+            os.system('supervisorctl start domain-monitor')
+            print(f"{GREEN}✓ 服务已启动！{NC}")
+        
+        print(f"\n{GREEN}设置完成！{NC}")
+        input("\n按回车返回主菜单...")
+    
+    def main_menu(self):
+        """主菜单"""
+        while True:
+            self.print_header()
+            self.print_status()
+            
+            print(f"{CYAN}主菜单：{NC}")
+            print("1. 🚀 快速开始")
+            print("2. 📋 域名管理")
+            print("3. ⚙️  服务控制")
+            print("4. 🔧 Telegram 设置")
+            print("5. ⏱️  修改检查间隔")
+            print("0. 退出")
+            
+            choice = input("\n请选择 [0-5]: ").strip()
+            
+            if choice == '1':
+                self.quick_start()
+            elif choice == '2':
+                self.manage_domains()
+            elif choice == '3':
+                self.service_control()
+            elif choice == '4':
+                self.configure_telegram()
+            elif choice == '5':
+                self.print_header()
+                print(f"当前检查间隔: {self.config.get('check_interval_minutes', 60)} 分钟\n")
+                try:
+                    interval = int(input("新的间隔(分钟): "))
+                    if 5 <= interval <= 1440:
+                        self.config['check_interval_minutes'] = interval
+                        self.save_config()
+                        print(f"{GREEN}✓ 已更新{NC}")
+                        print(f"{YELLOW}需要重启服务生效{NC}")
+                    else:
+                        print(f"{RED}请输入 5-1440 之间的数字{NC}")
+                except:
+                    print(f"{RED}无效输入{NC}")
+                time.sleep(2)
+            elif choice == '0':
+                print(f"\n{GREEN}再见！{NC}")
+                break
 
-# 运行主程序
-main
+if __name__ == '__main__':
+    menu = DomainMonitorMenu()
+    menu.main_menu()

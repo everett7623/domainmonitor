@@ -1,0 +1,26 @@
+{
+  "example-domain.com": {
+    "added_at": "2025-01-20T10:00:00",
+    "last_checked": "2025-01-20T11:00:00",
+    "status": "registered",
+    "notes": "这是我想要注册的主域名",
+    "notification_sent": false,
+    "expiry_notification_sent": false
+  },
+  "mydream-site.net": {
+    "added_at": "2025-01-20T10:30:00",
+    "last_checked": "2025-01-20T11:00:00",
+    "status": "available",
+    "notes": "备选域名，如果.com不可用就用这个",
+    "notification_sent": true,
+    "expiry_notification_sent": false
+  },
+  "cool-startup.io": {
+    "added_at": "2025-01-20T10:45:00",
+    "last_checked": null,
+    "status": "unknown",
+    "notes": "创业项目域名",
+    "notification_sent": false,
+    "expiry_notification_sent": false
+  }
+}

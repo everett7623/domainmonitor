@@ -1,9 +1,11 @@
 #!/bin/bash
 # =================================================================
-# Project: Domain Expiration Monitor (v1.1)
+# Project: Domain Expiration Monitor (v1.2)
 # Author: Everett7623
 # GitHub: https://github.com/everett7623/domainmonitor
-# Description: 一键安装脚本，用于设置域名到期监控和Telegram通知。
+# Description: 此脚本为一键安装脚本，用于设置域名到期监控和Telegram通知。
+#              它具备菜单交互功能，方便用户输入相关信息，同时会自动检查并安装依赖。
+#              配置完成后，会生成监控脚本并设置定时任务，确保域名到期能及时通知。
 # =================================================================
 
 # 颜色定义
@@ -94,39 +96,43 @@ set_domains() {
     echo ""
     echo "请输入您要监控的域名，多个域名请用空格隔开。"
     echo "例如: google.com github.com"
-    read -p "域名列表: " -a DOMAIN_ARRAY
-    DOMAINS=$(IFS=" "; echo "${DOMAIN_ARRAY[*]}")
-    if [ -z "$DOMAINS" ]; then
-        echo -e "${RED}域名列表不能为空！${NC}"
-        sleep 2
-    else
-        echo -e "${GREEN}域名已设置为: $DOMAINS${NC}"
-        sleep 2
-    fi
+    while true; do
+        read -p "域名列表: " -a DOMAIN_ARRAY
+        DOMAINS=$(IFS=" "; echo "${DOMAIN_ARRAY[*]}")
+        if [ -z "$DOMAINS" ]; then
+            echo -e "${RED}域名列表不能为空！请重新输入。${NC}"
+        else
+            echo -e "${GREEN}域名已设置为: $DOMAINS${NC}"
+            sleep 2
+            break
+        fi
+    done
 }
 
 # Telegram设置函数
 set_telegram() {
     echo ""
-    echo "请输入您的 Telegram Bot Token:"
-    read -p "Bot Token: " TELEGRAM_BOT_TOKEN
-    echo ""
-    echo "请输入您的 Telegram Chat ID:"
-    read -p "Chat ID: " TELEGRAM_CHAT_ID
-    echo ""
-    echo "请输入您希望提前多少天收到通知（默认为30天）:"
-    read -p "提前通知天数 [默认30]: " threshold_input
-    if [ -n "$threshold_input" ]; then
-        EXPIRY_THRESHOLD=$threshold_input
-    fi
+    while true; do
+        echo "请输入您的 Telegram Bot Token:"
+        read -p "Bot Token: " TELEGRAM_BOT_TOKEN
+        echo ""
+        echo "请输入您的 Telegram Chat ID:"
+        read -p "Chat ID: " TELEGRAM_CHAT_ID
+        echo ""
+        echo "请输入您希望提前多少天收到通知（默认为30天）:"
+        read -p "提前通知天数 [默认30]: " threshold_input
+        if [ -n "$threshold_input" ]; then
+            EXPIRY_THRESHOLD=$threshold_input
+        fi
 
-    if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-        echo -e "${RED}Bot Token 和 Chat ID 不能为空！${NC}"
-        sleep 2
-    else
-        echo -e "${GREEN}Telegram 设置成功！将提前 $EXPIRY_THRESHOLD 天通知。${NC}"
-        sleep 2
-    fi
+        if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo -e "${RED}Bot Token 和 Chat ID 不能为空！请重新输入。${NC}"
+        else
+            echo -e "${GREEN}Telegram 设置成功！将提前 $EXPIRY_THRESHOLD 天通知。${NC}"
+            sleep 2
+            break
+        fi
+    done
 }
 
 # 安装函数

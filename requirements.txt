@@ -1,0 +1,8 @@
+# 域名监控服务依赖包
+python-whois==0.8.0
+requests==2.31.0
+schedule==1.2.0
+
+# 可选依赖（用于更好的日志和性能）
+# colorlog==6.7.0
+# python-dotenv==1.0.0

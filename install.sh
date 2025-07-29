@@ -72,19 +72,6 @@ check_and_install_dependencies() {
 # 执行依赖检查
 check_and_install_dependencies
 
-# 菜单函数
-show_menu() {
-    clear
-    echo "=============================="
-    echo "   域名到期监控设置"
-    echo "=============================="
-    echo "1. 设置要监控的域名"
-    echo "2. 设置Telegram Bot通知"
-    echo "3. 完成并安装"
-    echo "4. 退出"
-    echo "=============================="
-}
-
 # 变量初始化
 DOMAINS=""
 TELEGRAM_BOT_TOKEN=""
@@ -245,6 +232,19 @@ EOM
     exit 0
 }
 
+# 菜单函数
+show_menu() {
+    clear
+    echo "=============================="
+    echo "   域名到期监控设置"
+    echo "=============================="
+    echo "1. 设置要监控的域名"
+    echo "2. 设置Telegram Bot通知"
+    echo "3. 完成并安装"
+    echo "4. 退出"
+    echo "=============================="
+}
+
 # 主循环
 while true; do
     show_menu
@@ -265,7 +265,7 @@ while true; do
             ;;
         *)
             echo -e "${RED}无效的输入，请输入 1-4 之间的数字。${NC}"
-            sleep 2
+            read -p "按回车键继续..."
             ;;
     esac
 done

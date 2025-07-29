@@ -5,7 +5,7 @@
 # 功能: 自动监控域名注册状态，支持Telegram Bot通知
 # 作者: everett7623
 # 版本: 1.0.0
-# 更新: 2025-07-29
+# 更新: 2025-01-29
 # ==============================================================================
 
 # 颜色定义
@@ -83,7 +83,7 @@ install_dependencies() {
     fi
     
     # 安装Python依赖
-    pip3 install requests python-whois schedule python-telegram-bot==13.7
+    pip3 install requests python-whois schedule python-telegram-bot==13.7 --break-system-packages 2>/dev/null || pip3 install requests python-whois schedule python-telegram-bot==13.7
     
     print_success "依赖安装完成"
 }
@@ -112,18 +112,35 @@ import sys
 import time
 import schedule
 import logging
-import whois
-import requests
 from datetime import datetime, timedelta
-from telegram import Bot
-from telegram.error import TelegramError
+
+# 尝试导入whois
+try:
+    import whois
+except ImportError:
+    print("警告: python-whois未安装，将使用备用方法")
+    whois = None
+
+import requests
+
+# 尝试导入telegram
+try:
+    from telegram import Bot
+    from telegram.error import TelegramError
+except ImportError:
+    print("警告: python-telegram-bot未安装，将使用requests发送通知")
+    Bot = None
 
 # 配置日志
+LOG_DIR = '/opt/domainmonitor/logs'
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/opt/domainmonitor/logs/monitor.log'),
+        logging.FileHandler(os.path.join(LOG_DIR, 'monitor.log')),
         logging.StreamHandler()
     ]
 )
@@ -174,42 +191,81 @@ class DomainMonitor:
             logging.warning("Telegram配置不完整，跳过通知")
             return
             
+        bot_token = self.config['telegram']['bot_token']
+        chat_id = self.config['telegram']['chat_id']
+        
+        # 方法1: 使用python-telegram-bot
+        if Bot is not None:
+            try:
+                bot = Bot(token=bot_token)
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode='HTML'
+                )
+                logging.info("Telegram通知发送成功 (使用python-telegram-bot)")
+                return
+            except Exception as e:
+                logging.error(f"使用python-telegram-bot发送失败: {e}")
+        
+        # 方法2: 使用requests
         try:
-            bot = Bot(token=self.config['telegram']['bot_token'])
-            bot.send_message(
-                chat_id=self.config['telegram']['chat_id'],
-                text=message,
-                parse_mode='HTML'
-            )
-            logging.info("Telegram通知发送成功")
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            data = {
+                'chat_id': chat_id,
+                'text': message,
+                'parse_mode': 'HTML'
+            }
+            response = requests.post(url, data=data, timeout=10)
+            if response.status_code == 200:
+                logging.info("Telegram通知发送成功 (使用requests)")
+            else:
+                logging.error(f"Telegram API返回错误: {response.text}")
         except Exception as e:
             logging.error(f"发送Telegram通知失败: {e}")
             
     def check_domain_status(self, domain):
         """检查域名状态"""
+        # 使用python-whois
+        if whois is not None:
+            try:
+                w = whois.whois(domain)
+                
+                # 判断域名是否已注册
+                if w.domain_name is None:
+                    return 'available', None, None
+                
+                # 获取过期时间
+                expiry_date = None
+                if isinstance(w.expiration_date, list):
+                    expiry_date = w.expiration_date[0]
+                else:
+                    expiry_date = w.expiration_date
+                    
+                # 计算剩余天数
+                days_until_expiry = None
+                if expiry_date:
+                    days_until_expiry = (expiry_date - datetime.now()).days
+                    
+                return 'registered', expiry_date, days_until_expiry
+                
+            except Exception as e:
+                logging.error(f"whois检查域名 {domain} 失败: {e}")
+        
+        # 备用方法：使用系统whois命令
         try:
-            w = whois.whois(domain)
-            
-            # 判断域名是否已注册
-            if w.domain_name is None:
-                return 'available', None, None
-            
-            # 获取过期时间
-            expiry_date = None
-            if isinstance(w.expiration_date, list):
-                expiry_date = w.expiration_date[0]
+            import subprocess
+            result = subprocess.run(['whois', domain], capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                output = result.stdout.lower()
+                if any(keyword in output for keyword in ['no found', 'not found', 'no match', 'not registered', 'available']):
+                    return 'available', None, None
+                else:
+                    return 'registered', None, None
             else:
-                expiry_date = w.expiration_date
-                
-            # 计算剩余天数
-            days_until_expiry = None
-            if expiry_date:
-                days_until_expiry = (expiry_date - datetime.now()).days
-                
-            return 'registered', expiry_date, days_until_expiry
-            
+                return 'error', None, None
         except Exception as e:
-            logging.error(f"检查域名 {domain} 失败: {e}")
+            logging.error(f"系统whois检查失败: {e}")
             return 'error', None, None
             
     def format_notification(self, domain, status, expiry_date, days_until_expiry):

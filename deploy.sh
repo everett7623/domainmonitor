@@ -172,7 +172,11 @@ if [[ "$add_domain" =~ ^[Yy]$ ]]; then
         fi
         read -p "添加备注（可选）: " notes
         cd "$PROJECT_DIR"
-        ./manage.sh add "$domain" "$notes"
+        if [ -z "$notes" ]; then
+            ./manage.sh add "$domain"
+        else
+            ./manage.sh add "$domain" "$notes"
+        fi
         echo -e "${GREEN}✓ 已添加域名: $domain${NC}"
     done
 fi

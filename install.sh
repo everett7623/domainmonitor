@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# 域名监控服务快速安装脚本
-# 一键从 GitHub 安装并配置
+# 域名监控服务 - 一键安装脚本
+# 极简版本，只包含必要组件
 
 set -e
 
-# 颜色定义
+# 颜色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,51 +13,71 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 clear
-echo -e "${BLUE}╔════════════════════════════════════════╗"
-echo -e "║      域名监控服务 - 一键安装脚本       ║"
-echo -e "╚════════════════════════════════════════╝${NC}"
-echo ""
+echo -e "${BLUE}======================================"
+echo "    域名监控服务 - 一键安装"
+echo "======================================${NC}"
 
-# 检查是否为 root
+# 检查 root
 if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}错误：请使用 root 用户运行${NC}"
-    echo "使用命令: sudo bash install.sh"
+    echo -e "${RED}请使用 root 用户运行${NC}"
     exit 1
 fi
 
-# 检查系统
-if ! command -v apt-get &> /dev/null; then
-    echo -e "${RED}错误：此脚本仅支持 Debian/Ubuntu 系统${NC}"
-    exit 1
-fi
+# 安装目录
+DIR="/opt/domain-monitor"
 
-echo -e "${GREEN}[1/5] 准备安装环境...${NC}"
+echo -e "\n${GREEN}[1/4] 安装系统依赖...${NC}"
 apt-get update -qq
-apt-get install -y git curl > /dev/null 2>&1
+apt-get install -y python3 python3-pip python3-venv supervisor >/dev/null 2>&1
 
-echo -e "${GREEN}[2/5] 下载项目文件...${NC}"
-cd /opt
-if [ -d "domainmonitor" ]; then
-    echo "检测到已存在的安装，是否覆盖？(y/n)"
-    read -p "> " overwrite
-    if [[ "$overwrite" =~ ^[Yy]$ ]]; then
-        rm -rf domainmonitor
-    else
-        echo "安装已取消"
-        exit 0
-    fi
+echo -e "${GREEN}[2/4] 创建项目环境...${NC}"
+mkdir -p $DIR
+cd $DIR
+
+# 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 安装 Python 包
+pip install -q python-whois requests
+
+echo -e "${GREEN}[3/4] 创建程序文件...${NC}"
+
+# 复制脚本文件（从当前目录或下载）
+if [ -f "domain_monitor.py" ]; then
+    cp domain_monitor.py menu.py $DIR/
+else
+    # 如果本地没有，从 GitHub 下载
+    echo "下载程序文件..."
+    curl -sL https://raw.githubusercontent.com/everett7623/domainmonitor/main/domain_monitor.py -o domain_monitor.py
+    curl -sL https://raw.githubusercontent.com/everett7623/domainmonitor/main/menu.py -o menu.py
 fi
 
-git clone https://github.com/everett7623/domainmonitor.git > /dev/null 2>&1
-cd domainmonitor
+chmod +x menu.py
 
-echo -e "${GREEN}[3/5] 执行安装...${NC}"
-chmod +x deploy.sh
-./deploy.sh
+# 创建 Supervisor 配置
+cat > /etc/supervisor/conf.d/domain-monitor.conf << EOF
+[program:domain-monitor]
+command=$DIR/venv/bin/python $DIR/domain_monitor.py
+directory=$DIR
+user=root
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/domain-monitor.log
+EOF
 
-echo ""
-echo -e "${GREEN}✅ 安装完成！${NC}"
-echo ""
-echo -e "${BLUE}立即开始使用：${NC}"
-echo "cd /opt/domainmonitor && ./menu.sh"
-echo ""
+supervisorctl reread >/dev/null 2>&1
+supervisorctl update >/dev/null 2>&1
+
+echo -e "${GREEN}[4/4] 安装完成！${NC}\n"
+
+echo -e "${YELLOW}启动管理菜单：${NC}"
+echo -e "cd $DIR && ./menu.py\n"
+
+# 询问是否立即启动
+read -p "是否现在启动管理菜单？(y/n): " start_menu
+if [[ "$start_menu" =~ ^[Yy]$ ]]; then
+    cd $DIR
+    ./menu.py
+fi

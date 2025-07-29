@@ -213,7 +213,7 @@ yum install whois      # CentOS/RHEL
 
 ## 更新日志
 
-### v1.0.0 (2025-01-29)
+### v1.0.0 (2025-07-29)
 - 初始版本发布
 - 支持域名状态监控
 - Telegram Bot通知

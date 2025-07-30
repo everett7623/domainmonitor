@@ -123,7 +123,32 @@ create_directories() {
     # 如果需要虚拟环境，创建它
     if [ "$USE_VENV" = true ]; then
         print_msg "$YELLOW" "🔧 创建虚拟环境..."
-        $PYTHON_CMD -m venv "$VENV_DIR" || error_exit "创建虚拟环境失败"
+        
+        # 尝试创建虚拟环境
+        if ! $PYTHON_CMD -m venv "$VENV_DIR" 2>/dev/null; then
+            print_msg "$YELLOW" "⚠️  缺少虚拟环境模块，尝试安装..."
+            
+            # 检测系统类型并安装相应的包
+            if command_exists apt-get; then
+                # Debian/Ubuntu 系统
+                PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+                print_msg "$CYAN" "检测到 Debian/Ubuntu 系统，需要安装 python${PYTHON_VERSION}-venv"
+                print_msg "$YELLOW" "请运行以下命令安装："
+                print_msg "$GREEN" "  sudo apt-get update && sudo apt-get install -y python${PYTHON_VERSION}-venv"
+                print_msg "$YELLOW" "\n安装完成后，请重新运行本安装脚本"
+                exit 1
+            elif command_exists yum; then
+                # RedHat/CentOS 系统
+                print_msg "$YELLOW" "请运行: sudo yum install python3-virtualenv"
+                exit 1
+            elif command_exists dnf; then
+                # Fedora 系统
+                print_msg "$YELLOW" "请运行: sudo dnf install python3-virtualenv"
+                exit 1
+            else
+                error_exit "无法自动安装虚拟环境模块，请手动安装后重试"
+            fi
+        fi
         
         # 更新 Python 命令为虚拟环境中的 Python
         PYTHON_CMD="$VENV_DIR/bin/python"

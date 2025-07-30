@@ -198,7 +198,7 @@ class DomainMonitor:
             self.config = {
                 'telegram': {'bot_token': '', 'chat_id': ''},
                 'check_interval': 60,
-                'notify_days_before_expiry':
+                'notify_days_before_expiry': [30, 7, 3, 1]
             }
             
     def load_history(self):
@@ -332,7 +332,7 @@ class DomainMonitor:
             line_lower = line.lower()
             for keyword in expiry_keywords:
                 if keyword in line_lower:
-                    date_str = line.split(':', 1).strip()
+                    date_str = line.split(':', 1)[1].strip()
                     # 尝试多种日期格式
                     for fmt in [
                         '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d', '%d/%m/%Y',
@@ -340,7 +340,7 @@ class DomainMonitor:
                         '%Y-%m-%dT%H:%M:%S%z'
                     ]:
                         try:
-                            return datetime.strptime(date_str.split(), fmt)
+                            return datetime.strptime(date_str.split()[0], fmt)
                         except:
                             continue
         return None
@@ -420,7 +420,7 @@ class DomainMonitor:
                 
         # 即将过期提醒
         if status == 'registered' and days_until_expiry is not None:
-            notify_days = self.config.get('notify_days_before_expiry',)
+            notify_days = self.config.get('notify_days_before_expiry', [30, 7, 3, 1])
             for days in notify_days:
                 if days_until_expiry == days:
                     last_notify_key = f'notified_{days}d'
@@ -466,7 +466,7 @@ class DomainMonitor:
                         
                         # 记录特定天数的通知
                         if days_until_expiry is not None:
-                            for days in self.config.get('notify_days_before_expiry',):
+                            for days in self.config.get('notify_days_before_expiry', [30, 7, 3, 1]):
                                 if days_until_expiry == days:
                                     self.history[domain][f'notified_{days}d'] = True
                     else:
@@ -482,7 +482,7 @@ class DomainMonitor:
                 
                 # 清理过期的通知标记
                 if status == 'available' or (days_until_expiry and days_until_expiry > 30):
-                    for days in:
+                    for days in [30, 7, 3, 1]:
                         self.history[domain].pop(f'notified_{days}d', None)
                 
             except Exception as e:
@@ -1354,7 +1354,7 @@ with open('$CONFIG_FILE', 'w') as f:
 import json
 with open('$CONFIG_FILE', 'r') as f:
     config = json.load(f)
-config['check_interval'] = $interval
+config['check_interval'] = int($interval)
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
 "

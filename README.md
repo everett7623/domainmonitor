@@ -1,108 +1,121 @@
-# 域名监控系统 (Domain Monitor)
+# DomainMonitor - 域名监控系统
 
-一个自动监控域名注册状态的 Python 脚本，支持 Telegram Bot 通知，帮助用户及时获知心仪域名的可注册状态。
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/python-3.6+-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License">
+  <img src="https://img.shields.io/badge/platform-Linux-orange.svg" alt="Platform">
+</p>
 
-## 功能特点
+<p align="center">
+  <b>🔍 自动监控域名注册状态，让心仪域名不再错过</b>
+</p>
+
+## 🌟 功能特点
 
 - 🔍 **自动检测**：定期检查域名的注册状态
 - 📱 **即时通知**：通过 Telegram Bot 发送详细通知
 - 📊 **状态追踪**：记录每个域名的检查历史
-- ⏰ **到期提醒**：域名即将到期时自动提醒
-- 🛠️ **易于管理**：提供简单的命令行管理工具
+- ⏰ **到期提醒**：域名即将到期时自动提醒（30/7/3/1天）
+- 🛠️ **易于管理**：提供友好的命令行管理界面
 - 📝 **详细日志**：完整的运行日志记录
+- 🚀 **批量监控**：支持同时监控多个域名
+- 🔄 **灵活配置**：可自定义检查间隔和提醒时间
 
-## 快速安装
+## 📋 系统要求
+
+- Linux 系统（支持 Ubuntu/Debian/CentOS）
+- Python 3.6 或更高版本
+- Root 权限（用于安装系统服务）
+- 网络连接（用于查询域名状态和发送通知）
+
+## 🚀 快速安装
+
+使用一键安装脚本：
 
 ```bash
 bash <(curl -sSL https://raw.githubusercontent.com/everett7623/domainmonitor/main/install.sh)
 ```
 
-## Telegram通知问题修复
+或者下载后执行：
 
-### 问题原因
-1. **网络连接问题**：服务器无法访问Telegram API
-2. **配置错误**：Bot Token或Chat ID配置不正确
-3. **依赖问题**：python-telegram-bot版本不兼容
-
-### 解决方案
-
-#### 1. 检查网络连接
 ```bash
-# 测试是否能访问Telegram API
-curl -s https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe
+wget https://raw.githubusercontent.com/everett7623/domainmonitor/main/install.sh
+chmod +x install.sh
+sudo ./install.sh
 ```
 
-#### 2. 验证配置
-```bash
-# 查看当前配置
-cat /opt/domainmonitor/config.json
+## 📱 Telegram Bot 配置
 
-# 测试Bot Token是否有效
-curl -s "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe" | python3 -m json.tool
-```
+### 1. 创建 Bot
 
-#### 3. 获取正确的Chat ID
-```bash
-# 1. 给你的Bot发送一条消息
-# 2. 然后访问以下URL获取Chat ID
-curl -s "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates" | python3 -m json.tool
-```
+1. 在 Telegram 中搜索 **@BotFather**
+2. 发送 `/newbot` 创建新机器人
+3. 按提示设置机器人名称（如：Domain Monitor）
+4. 设置用户名（必须以bot结尾，如：domainmonitor_bot）
+5. 获得 **Bot Token**（格式：1234567890:ABCdefGHIjklMNOpqrsTUVwxyz）
 
-#### 4. 手动测试通知
-```python
-# 创建测试脚本 test_telegram.py
-import requests
+### 2. 获取 Chat ID
 
-bot_token = "YOUR_BOT_TOKEN"
-chat_id = "YOUR_CHAT_ID"
+1. 搜索并打开您刚创建的机器人
+2. 发送任意消息（如：Hello）
+3. 在浏览器访问：`https://api.telegram.org/bot<BOT_TOKEN>/getUpdates`
+4. 在返回的 JSON 中找到 `"chat":{"id":数字}`，这个数字就是 Chat ID
 
-url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-data = {
-    'chat_id': chat_id,
-    'text': '测试消息：域名监控系统正常工作！'
-}
+### 3. 配置通知
 
-response = requests.post(url, data=data)
-print(response.json())
-```
+在安装过程中或通过管理菜单配置 Bot Token 和 Chat ID。
 
-#### 5. 使用代理（如果在中国大陆）
-```bash
-# 编辑 /opt/domainmonitor/domain_monitor.py
-# 在requests中添加代理
-proxies = {
-    'http': 'http://127.0.0.1:7890',
-    'https': 'http://127.0.0.1:7890',
-}
-response = requests.post(url, data=data, proxies=proxies, timeout=10)
-```
+## 📖 使用指南
 
-## 管理命令
+### 管理命令
 
-运行管理脚本：
+安装完成后，使用以下命令打开管理菜单：
+
 ```bash
 /opt/domainmonitor/manage.sh
 ```
 
-### 菜单选项
-1. **添加监控域名** - 添加新的域名到监控列表
-2. **删除监控域名** - 从监控列表中删除域名
-3. **配置Telegram Bot通知** - 设置Bot Token和Chat ID
-4. **删除Telegram Bot通知** - 清除Telegram配置
-5. **查看监控域名列表** - 显示所有监控的域名
-6. **查看服务状态** - 检查监控服务运行状态
-7. **重启监控服务** - 重启域名监控服务
-8. **查看运行日志** - 实时查看系统日志
-9. **卸载监控系统** - 完全卸载系统
+### 管理菜单功能
 
-## 常用命令
+```
+========================================
+        域名监控管理系统 v2.0          
+========================================
+1. 添加监控域名
+2. 删除监控域名
+3. 配置Telegram Bot通知
+4. 删除Telegram Bot通知
+5. 查看监控域名列表
+6. 查看服务状态
+7. 重启监控服务
+8. 查看运行日志
+9. 立即检查所有域名
+10. 修改检查间隔
+11. 查看检查历史
+12. 高级设置
+13. 卸载监控系统
+0. 退出
+========================================
+```
 
+### 常用操作
+
+#### 添加域名
 ```bash
-# 查看服务状态
-systemctl status domainmonitor
+# 可以一次添加多个域名
+示例：example.com domain.net test.org
+```
 
-# 查看日志
+#### 查看日志
+```bash
 tail -f /opt/domainmonitor/logs/monitor.log
+```
+
+#### 服务管理
+```bash
+# 查看状态
+systemctl status domainmonitor
 
 # 重启服务
 systemctl restart domainmonitor
@@ -114,32 +127,17 @@ systemctl stop domainmonitor
 systemctl start domainmonitor
 ```
 
-## 配置文件说明
-
-配置文件位置：`/opt/domainmonitor/config.json`
-
-```json
-{
-  "telegram": {
-    "bot_token": "YOUR_BOT_TOKEN",
-    "chat_id": "YOUR_CHAT_ID"
-  },
-  "check_interval": 60
-}
-```
-
-- `bot_token`: Telegram Bot的Token
-- `chat_id`: 接收通知的Chat ID
-- `check_interval`: 检查间隔（分钟）
-
-## 通知内容示例
+## 📬 通知内容
 
 ### 域名可注册通知
+
+当监控的域名变为可注册状态时，您将收到：
+
 ```
 🔔 域名监控通知
 
 域名: example.com
-时间: 2025-01-29 10:30:45
+时间: 2025-01-29 10:30:00
 
 状态: ✅ 可以注册！
 
@@ -162,73 +160,91 @@ systemctl start domainmonitor
 ⚡ 请尽快行动，好域名稍纵即逝！
 ```
 
-### 域名即将过期通知
+### 域名到期提醒
+
+在域名到期前的30天、7天、3天和1天，您将收到提醒通知。
+
+## 🔧 高级设置
+
+### 修改检查间隔
+
+默认每60分钟检查一次，可根据需求调整：
+
+- **5分钟**：紧急监控（域名即将释放）
+- **15分钟**：高频监控（重要域名）
+- **30分钟**：常规监控
+- **60分钟**：标准监控（默认）
+- **120分钟**：低频监控（一般关注）
+- **360分钟**：每日检查（长期关注）
+
+### 自定义提醒天数
+
+可以自定义域名到期前多少天发送提醒，默认为：30、7、3、1天。
+
+### 批量导入域名
+
+支持从文本文件批量导入域名列表，每行一个域名。
+
+## 📁 文件结构
+
 ```
-🔔 域名监控通知
-
-域名: example.com
-时间: 2025-01-29 10:30:45
-
-状态: ❌ 已被注册
-过期时间: 2025-02-15
-剩余天数: ⚠️ 17 天
-
-💡 域名即将过期，持续监控中...
+/opt/domainmonitor/
+├── domain_monitor.py    # 主监控程序
+├── manage.sh           # 管理脚本
+├── config.json         # 配置文件
+├── domains.txt         # 域名列表
+├── history.json        # 历史记录
+└── logs/
+    └── monitor.log     # 运行日志
 ```
 
-## 故障排除
+## 🐛 常见问题
 
-### 1. 服务无法启动
+### 1. 无法收到Telegram通知
+
+- 检查 Bot Token 和 Chat ID 是否正确
+- 确保已经给机器人发送过消息
+- 检查网络是否能访问 Telegram API
+
+### 2. whois命令不可用
+
+部分系统可能需要手动安装：
+
 ```bash
-# 查看详细错误
+# Ubuntu/Debian
+apt-get install whois
+
+# CentOS
+yum install whois
+```
+
+### 3. 服务无法启动
+
+查看详细错误信息：
+
+```bash
 journalctl -u domainmonitor -n 50
-
-# 检查Python依赖
-pip3 list | grep -E "requests|telegram|schedule"
-
-# 重新安装依赖
-pip3 install -r /opt/domainmonitor/requirements.txt
 ```
 
-### 2. Telegram通知不工作
-```bash
-# 测试网络连接
-ping -c 4 api.telegram.org
+## 🤝 贡献
 
-# 手动发送测试消息
-curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
-     -d "chat_id=<CHAT_ID>" \
-     -d "text=Test message"
-```
+欢迎提交 Issue 和 Pull Request！
 
-### 3. 域名检查失败
-```bash
-# 测试whois命令
-whois google.com
+## 📄 许可证
 
-# 如果whois不可用，安装它
-apt-get install whois  # Debian/Ubuntu
-yum install whois      # CentOS/RHEL
-```
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
 
-## 更新日志
+## 👨‍💻 作者
 
-### v1.0.0 (2025-07-29)
-- 初始版本发布
-- 支持域名状态监控
-- Telegram Bot通知
-- 多种通知方式支持（python-telegram-bot、requests、curl）
-- 域名过期提醒
-- 完整的管理界面
+- **everett7623**
+- GitHub: [https://github.com/everett7623](https://github.com/everett7623)
 
-## 贡献
+## 🌟 Star History
 
-欢迎提交Issue和Pull Request！
+如果这个项目对您有帮助，请给个 Star ⭐ 支持一下！
 
-## 许可证
+---
 
-MIT License
-
-## 作者
-
-- GitHub: [everett7623](https://github.com/everett7623)
+<p align="center">
+  Made with ❤️ by everett7623
+</p>

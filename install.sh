@@ -880,7 +880,6 @@ try:
 except:
     print("暂无历史记录")
 EOF
-        fi
     fi
 }
 

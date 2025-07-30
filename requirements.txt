@@ -1,0 +1,12 @@
+# DomainMonitor Python 依赖包
+# GitHub: https://github.com/everett7623/domainmonitor
+
+# 核心依赖
+requests>=2.28.0
+python-whois>=0.8.0
+
+# 日志和配置
+python-dateutil>=2.8.2
+
+# 可选依赖（提高性能）
+dnspython>=2.3.0

@@ -1,17 +1,16 @@
 #!/bin/bash
-#
-# Domain Monitor 一键安装脚本
-# GitHub: https://github.com/everett7623/domainmonitor
+# ================================================================================
+# DomainMonitor - 域名状态监控系统安装脚本
 # 
-# 使用方法:
-# bash <(curl -sSL https://raw.githubusercontent.com/everett7623/domainmonitor/main/install.sh)
-#
-# 功能说明:
-# - 自动检测并安装依赖
-# - 下载并配置域名监控程序
-# - 设置系统定时任务
-# - 提供友好的交互界面
-#
+# 作者: everett7623
+# GitHub: https://github.com/everett7623/domainmonitor
+# 版本: v1.0.0
+# 
+# 描述: 自动监控域名注册状态，支持 Telegram 通知
+# 使用: bash <(curl -sSL https://raw.githubusercontent.com/everett7623/domainmonitor/main/install.sh)
+# ================================================================================
+
+set -e
 
 # 颜色定义
 RED='\033[0;31m'
@@ -23,455 +22,337 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 配置变量
-INSTALL_DIR="$HOME/.domainmonitor"
-CONFIG_FILE="$INSTALL_DIR/config.json"
-LOG_DIR="$INSTALL_DIR/logs"
-GITHUB_RAW_URL="https://raw.githubusercontent.com/everett7623/domainmonitor/main"
-PYTHON_MIN_VERSION="3.7"
-USE_VENV=false
-VENV_DIR="$INSTALL_DIR/venv"
+INSTALL_DIR="/opt/domainmonitor"
+SERVICE_NAME="domainmonitor"
+GITHUB_USER="everett7623"
+GITHUB_REPO="domainmonitor"
+GITHUB_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}"
+RAW_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main"
 
 # 打印带颜色的消息
 print_msg() {
-    local color=$1
-    local msg=$2
-    echo -e "${color}${msg}${NC}"
+    echo -e "${2}${1}${NC}"
 }
 
 # 打印标题
-print_title() {
+print_header() {
     echo
-    print_msg "$PURPLE" "=========================================="
-    print_msg "$CYAN" "       Domain Monitor 安装向导"
-    print_msg "$PURPLE" "=========================================="
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║              DomainMonitor 域名监控系统 v1.0.0            ║${NC}"
+    echo -e "${CYAN}║                  Author: everett7623                      ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo
 }
 
-# 打印错误并退出
-error_exit() {
-    print_msg "$RED" "❌ 错误: $1"
-    exit 1
-}
-
-# 检查命令是否存在
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# 比较版本号
-version_ge() {
-    [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
-}
-
-# 检查 Python 版本
-check_python() {
-    print_msg "$BLUE" "🔍 检查 Python 环境..."
+# 检查系统要求
+check_requirements() {
+    print_msg "▶ 检查系统要求..." "$BLUE"
     
-    if command_exists python3; then
-        PYTHON_CMD="python3"
-    elif command_exists python; then
-        PYTHON_CMD="python"
+    # 检查是否为 root 用户
+    if [[ $EUID -ne 0 ]]; then
+        print_msg "✗ 错误: 此脚本需要 root 权限运行" "$RED"
+        print_msg "  请使用: sudo bash $0" "$YELLOW"
+        exit 1
+    fi
+    
+    # 检查操作系统
+    if [[ ! -f /etc/os-release ]]; then
+        print_msg "✗ 错误: 无法检测操作系统类型" "$RED"
+        exit 1
+    fi
+    
+    . /etc/os-release
+    OS=$ID
+    OS_VERSION=$VERSION_ID
+    
+    print_msg "✓ 检测到系统: $PRETTY_NAME" "$GREEN"
+    
+    # 检查 Python
+    if ! command -v python3 &> /dev/null; then
+        print_msg "✗ Python3 未安装，正在安装..." "$YELLOW"
+        case $OS in
+            ubuntu|debian)
+                apt-get update && apt-get install -y python3 python3-pip python3-venv
+                ;;
+            centos|rhel|fedora)
+                yum install -y python3 python3-pip
+                ;;
+            *)
+                print_msg "✗ 不支持的操作系统: $OS" "$RED"
+                exit 1
+                ;;
+        esac
     else
-        error_exit "未找到 Python，请先安装 Python 3.7 或更高版本"
+        PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+        print_msg "✓ Python 版本: $PYTHON_VERSION" "$GREEN"
     fi
     
-    # 获取 Python 版本
-    PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    
-    if ! version_ge "$PYTHON_VERSION" "$PYTHON_MIN_VERSION"; then
-        error_exit "Python 版本过低，需要 $PYTHON_MIN_VERSION 或更高版本，当前版本: $PYTHON_VERSION"
+    # 检查 Git
+    if ! command -v git &> /dev/null; then
+        print_msg "✗ Git 未安装，正在安装..." "$YELLOW"
+        case $OS in
+            ubuntu|debian)
+                apt-get install -y git
+                ;;
+            centos|rhel|fedora)
+                yum install -y git
+                ;;
+        esac
     fi
     
-    print_msg "$GREEN" "✅ Python $PYTHON_VERSION 符合要求"
+    # 检查 whois
+    if ! command -v whois &> /dev/null; then
+        print_msg "✗ whois 未安装，正在安装..." "$YELLOW"
+        case $OS in
+            ubuntu|debian)
+                apt-get install -y whois
+                ;;
+            centos|rhel|fedora)
+                yum install -y whois
+                ;;
+        esac
+    fi
+    
+    print_msg "✓ 系统要求检查完成" "$GREEN"
 }
 
-# 检查并安装 pip
-check_pip() {
-    print_msg "$BLUE" "🔍 检查 pip..."
-    
-    # 检查是否在外部管理的环境中
-    if $PYTHON_CMD -c "import sys; sys.exit(0 if hasattr(sys, '_base_executable') else 1)" 2>/dev/null; then
-        USE_VENV=true
-        print_msg "$YELLOW" "⚠️  检测到外部管理的 Python 环境，将使用虚拟环境"
-    fi
-    
-    if ! $PYTHON_CMD -m pip --version >/dev/null 2>&1; then
-        if [ "$USE_VENV" = true ]; then
-            print_msg "$YELLOW" "⚠️  将在虚拟环境中安装"
-        else
-            print_msg "$YELLOW" "⚠️  未找到 pip，正在安装..."
-            curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON_CMD --user 2>/dev/null || {
-                print_msg "$YELLOW" "⚠️  标准安装失败，尝试其他方法..."
-                USE_VENV=true
-            }
-        fi
-    fi
-    
-    if [ "$USE_VENV" != true ]; then
-        print_msg "$GREEN" "✅ pip 已就绪"
-    fi
-}
-
-# 创建目录结构
+# 创建安装目录
 create_directories() {
-    print_msg "$BLUE" "📁 创建目录结构..."
+    print_msg "\n▶ 创建安装目录..." "$BLUE"
     
-    mkdir -p "$INSTALL_DIR"
-    mkdir -p "$LOG_DIR"
-    mkdir -p "$INSTALL_DIR/bin"
+    # 创建主目录
+    mkdir -p $INSTALL_DIR/{logs,data,config}
     
-    # 如果需要虚拟环境，创建它
-    if [ "$USE_VENV" = true ]; then
-        print_msg "$YELLOW" "🔧 创建虚拟环境..."
-        
-        # 尝试创建虚拟环境
-        if ! $PYTHON_CMD -m venv "$VENV_DIR" 2>/dev/null; then
-            print_msg "$YELLOW" "⚠️  缺少虚拟环境模块，尝试安装..."
-            
-            # 检测系统类型并安装相应的包
-            if command_exists apt-get; then
-                # Debian/Ubuntu 系统
-                PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-                print_msg "$CYAN" "检测到 Debian/Ubuntu 系统，需要安装 python${PYTHON_VERSION}-venv"
-                print_msg "$YELLOW" "请运行以下命令安装："
-                print_msg "$GREEN" "  sudo apt-get update && sudo apt-get install -y python${PYTHON_VERSION}-venv"
-                print_msg "$YELLOW" "\n安装完成后，请重新运行本安装脚本"
-                exit 1
-            elif command_exists yum; then
-                # RedHat/CentOS 系统
-                print_msg "$YELLOW" "请运行: sudo yum install python3-virtualenv"
-                exit 1
-            elif command_exists dnf; then
-                # Fedora 系统
-                print_msg "$YELLOW" "请运行: sudo dnf install python3-virtualenv"
-                exit 1
-            else
-                error_exit "无法自动安装虚拟环境模块，请手动安装后重试"
-            fi
-        fi
-        
-        # 更新 Python 命令为虚拟环境中的 Python
-        PYTHON_CMD="$VENV_DIR/bin/python"
-        PIP_CMD="$VENV_DIR/bin/pip"
-        
-        # 升级虚拟环境中的 pip
-        $PYTHON_CMD -m pip install --upgrade pip >/dev/null 2>&1
-        
-        print_msg "$GREEN" "✅ 虚拟环境创建成功"
-    else
-        PIP_CMD="$PYTHON_CMD -m pip"
-    fi
+    # 设置权限
+    chmod 755 $INSTALL_DIR
+    chmod 755 $INSTALL_DIR/{logs,data,config}
     
-    print_msg "$GREEN" "✅ 目录创建成功"
-}
-
-# 安装 Python 依赖
-install_dependencies() {
-    print_msg "$BLUE" "📦 安装依赖包..."
-    
-    # 创建 requirements.txt
-    cat > "$INSTALL_DIR/requirements.txt" << EOF
-requests>=2.28.0
-python-whois>=0.8.0
-schedule>=1.2.0
-python-telegram-bot>=20.0
-colorama>=0.4.6
-tabulate>=0.9.0
-EOF
-    
-    # 安装依赖
-    if [ "$USE_VENV" = true ]; then
-        $PIP_CMD install -r "$INSTALL_DIR/requirements.txt" || error_exit "依赖安装失败"
-    else
-        $PIP_CMD install -r "$INSTALL_DIR/requirements.txt" --user || error_exit "依赖安装失败"
-    fi
-    
-    print_msg "$GREEN" "✅ 依赖安装成功"
+    print_msg "✓ 目录创建完成" "$GREEN"
 }
 
 # 下载主程序
-download_main_program() {
-    print_msg "$BLUE" "📥 下载主程序..."
+download_program() {
+    print_msg "\n▶ 下载程序文件..." "$BLUE"
     
-    # 下载 domainmonitor.py
-    curl -sS -o "$INSTALL_DIR/domainmonitor.py" "$GITHUB_RAW_URL/domainmonitor.py" || error_exit "主程序下载失败"
+    cd $INSTALL_DIR
     
-    # 设置执行权限
-    chmod +x "$INSTALL_DIR/domainmonitor.py"
+    # 下载主程序
+    print_msg "  下载 domainmonitor.py..." "$CYAN"
+    curl -sSL "${RAW_URL}/domainmonitor.py" -o domainmonitor.py
+    chmod +x domainmonitor.py
     
-    print_msg "$GREEN" "✅ 主程序下载成功"
-}
-
-# 创建管理脚本
-create_management_script() {
-    print_msg "$BLUE" "🔧 创建管理脚本..."
-    
-    # 根据是否使用虚拟环境创建不同的脚本
-    if [ "$USE_VENV" = true ]; then
-        cat > "$INSTALL_DIR/bin/domainmonitor" << EOF
-#!/bin/bash
-cd "$INSTALL_DIR"
-"$VENV_DIR/bin/python" domainmonitor.py "\$@"
-EOF
-    else
-        cat > "$INSTALL_DIR/bin/domainmonitor" << EOF
-#!/bin/bash
-cd "$INSTALL_DIR"
-$PYTHON_CMD domainmonitor.py "\$@"
-EOF
-    fi
-    
-    chmod +x "$INSTALL_DIR/bin/domainmonitor"
+    # 下载管理脚本
+    print_msg "  下载 domainctl.sh..." "$CYAN"
+    curl -sSL "${RAW_URL}/domainctl.sh" -o domainctl.sh
+    chmod +x domainctl.sh
     
     # 创建软链接
-    if [ -d "$HOME/.local/bin" ]; then
-        ln -sf "$INSTALL_DIR/bin/domainmonitor" "$HOME/.local/bin/domainmonitor"
-        LOCAL_BIN_PATH="$HOME/.local/bin"
-    elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
-        ln -sf "$INSTALL_DIR/bin/domainmonitor" "/usr/local/bin/domainmonitor"
-        LOCAL_BIN_PATH="/usr/local/bin"
-    fi
+    ln -sf $INSTALL_DIR/domainctl.sh /usr/local/bin/domainctl
     
-    print_msg "$GREEN" "✅ 管理脚本创建成功"
+    print_msg "✓ 程序下载完成" "$GREEN"
 }
 
-# 配置初始设置
-configure_initial_settings() {
-    print_msg "$CYAN" "\n📝 初始配置"
-    print_msg "$YELLOW" "请按照提示完成初始配置："
+# 创建 Python 虚拟环境
+setup_python_env() {
+    print_msg "\n▶ 设置 Python 环境..." "$BLUE"
+    
+    cd $INSTALL_DIR
+    
+    # 创建虚拟环境
+    python3 -m venv venv
+    
+    # 激活虚拟环境并安装依赖
+    source venv/bin/activate
+    pip install --upgrade pip
+    
+    # 下载并安装依赖
+    print_msg "  安装 Python 依赖包..." "$CYAN"
+    curl -sSL "${RAW_URL}/requirements.txt" -o requirements.txt
+    pip install -r requirements.txt
+    
+    deactivate
+    
+    print_msg "✓ Python 环境设置完成" "$GREEN"
+}
+
+# 配置 Telegram Bot
+configure_telegram() {
+    print_msg "\n▶ 配置 Telegram Bot..." "$BLUE"
+    
+    echo -e "${YELLOW}请准备您的 Telegram Bot 信息：${NC}"
+    echo -e "${CYAN}1. 在 Telegram 中找到 @BotFather${NC}"
+    echo -e "${CYAN}2. 发送 /newbot 创建新机器人${NC}"
+    echo -e "${CYAN}3. 获取 Bot Token${NC}"
+    echo -e "${CYAN}4. 获取您的 Chat ID (可以通过 @userinfobot 获取)${NC}"
     echo
     
-    # 域名列表
-    domains=()
-    while true; do
-        read -p "$(echo -e ${CYAN}"请输入要监控的域名 (直接回车完成输入): "${NC})" domain
-        if [ -z "$domain" ]; then
-            if [ ${#domains[@]} -eq 0 ]; then
-                print_msg "$RED" "⚠️  至少需要添加一个域名"
-                continue
-            else
-                break
-            fi
-        fi
-        domains+=("$domain")
-        print_msg "$GREEN" "✅ 已添加: $domain"
-    done
-    
-    # Telegram 配置
-    echo
-    print_msg "$CYAN" "📱 Telegram Bot 配置 (可选，直接回车跳过)"
-    read -p "$(echo -e ${CYAN}"Bot Token: "${NC})" bot_token
-    
-    chat_id=""
-    if [ -n "$bot_token" ]; then
-        read -p "$(echo -e ${CYAN}"Chat ID: "${NC})" chat_id
-    fi
-    
-    # 检查是否安装了 jq
-    if ! command_exists jq; then
-        print_msg "$YELLOW" "⚠️  检测到缺少 jq 工具，尝试安装..."
-        if command_exists apt-get; then
-            sudo apt-get update && sudo apt-get install -y jq 2>/dev/null || {
-                print_msg "$YELLOW" "⚠️  无法自动安装 jq，将使用 Python 生成配置"
-                USE_PYTHON_FOR_CONFIG=true
-            }
-        elif command_exists yum; then
-            sudo yum install -y jq 2>/dev/null || USE_PYTHON_FOR_CONFIG=true
-        elif command_exists brew; then
-            brew install jq 2>/dev/null || USE_PYTHON_FOR_CONFIG=true
-        else
-            USE_PYTHON_FOR_CONFIG=true
-        fi
-    fi
+    read -p "请输入 Telegram Bot Token: " BOT_TOKEN
+    read -p "请输入 Telegram Chat ID: " CHAT_ID
     
     # 创建配置文件
-    if [ "$USE_PYTHON_FOR_CONFIG" = true ]; then
-        # 使用 Python 生成 JSON
-        $PYTHON_CMD << EOF
-import json
-config = {
-    "domains": $(printf '[%s]' "$(printf '"%s",' "${domains[@]}" | sed 's/,$//')"),
-    "telegram": {
-        "bot_token": "$bot_token",
-        "chat_id": "$chat_id"
-    },
-    "check_interval": 3600,
-    "log_level": "INFO",
-    "registrars": [
-        {
-            "name": "Namecheap",
-            "url": "https://www.namecheap.com",
-            "features": ["价格优惠", "免费隐私保护", "支持支付宝"]
-        },
-        {
-            "name": "Cloudflare",
-            "url": "https://www.cloudflare.com/products/registrar/",
-            "features": ["成本价注册", "免费 CDN", "无隐藏费用"]
-        },
-        {
-            "name": "阿里云",
-            "url": "https://wanwang.aliyun.com",
-            "features": ["国内访问快", "中文支持", "企业服务"]
-        }
-    ]
-}
-with open("$CONFIG_FILE", "w", encoding="utf-8") as f:
-    json.dump(config, f, indent=4, ensure_ascii=False)
-EOF
-    else
-        # 使用 jq 生成 JSON
-        cat > "$CONFIG_FILE" << EOF
+    cat > $INSTALL_DIR/config/config.json << EOF
 {
-    "domains": $(printf '%s\n' "${domains[@]}" | jq -R . | jq -s .),
     "telegram": {
-        "bot_token": "$bot_token",
-        "chat_id": "$chat_id"
+        "bot_token": "$BOT_TOKEN",
+        "chat_id": "$CHAT_ID"
     },
-    "check_interval": 3600,
-    "log_level": "INFO",
+    "check_interval": 300,
+    "domains": [],
     "registrars": [
         {
             "name": "Namecheap",
             "url": "https://www.namecheap.com",
-            "features": ["价格优惠", "免费隐私保护", "支持支付宝"]
+            "features": ["价格实惠", "免费隐私保护", "支持支付宝"]
+        },
+        {
+            "name": "GoDaddy",
+            "url": "https://www.godaddy.com",
+            "features": ["全球最大注册商", "24/7客服", "域名管理方便"]
         },
         {
             "name": "Cloudflare",
             "url": "https://www.cloudflare.com/products/registrar/",
-            "features": ["成本价注册", "免费 CDN", "无隐藏费用"]
+            "features": ["成本价注册", "免费CDN", "安全性高"]
         },
         {
             "name": "阿里云",
             "url": "https://wanwang.aliyun.com",
-            "features": ["国内访问快", "中文支持", "企业服务"]
+            "features": ["国内领先", "备案方便", "企业服务完善"]
         }
     ]
 }
 EOF
-    fi
     
-    print_msg "$GREEN" "✅ 配置文件创建成功"
+    print_msg "✓ Telegram 配置完成" "$GREEN"
 }
 
-# 设置定时任务
-setup_cron() {
-    print_msg "$BLUE" "⏰ 设置定时任务..."
+# 添加域名
+add_initial_domains() {
+    print_msg "\n▶ 添加监控域名..." "$BLUE"
     
-    # 确定 Python 路径
-    if [ "$USE_VENV" = true ]; then
-        CRON_PYTHON="$VENV_DIR/bin/python"
-    else
-        CRON_PYTHON="$PYTHON_CMD"
+    echo -e "${YELLOW}请输入要监控的域名（每行一个，输入空行结束）：${NC}"
+    
+    DOMAINS=()
+    while true; do
+        read -p "> " domain
+        if [[ -z "$domain" ]]; then
+            break
+        fi
+        DOMAINS+=("$domain")
+    done
+    
+    if [[ ${#DOMAINS[@]} -gt 0 ]]; then
+        # 使用 Python 脚本添加域名
+        cd $INSTALL_DIR
+        source venv/bin/activate
+        
+        for domain in "${DOMAINS[@]}"; do
+            python3 -c "
+import json
+with open('config/config.json', 'r') as f:
+    config = json.load(f)
+config['domains'].append('$domain')
+with open('config/config.json', 'w') as f:
+    json.dump(config, f, indent=4)
+"
+            print_msg "  ✓ 已添加: $domain" "$GREEN"
+        done
+        
+        deactivate
     fi
+}
+
+# 创建 systemd 服务
+create_service() {
+    print_msg "\n▶ 创建系统服务..." "$BLUE"
     
-    # 创建 systemd service (如果支持)
-    if command_exists systemctl && [ -d "$HOME/.config/systemd/user" ]; then
-        mkdir -p "$HOME/.config/systemd/user"
-        cat > "$HOME/.config/systemd/user/domainmonitor.service" << EOF
+    cat > /etc/systemd/system/${SERVICE_NAME}.service << EOF
 [Unit]
-Description=Domain Monitor Service
+Description=DomainMonitor - 域名状态监控服务
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$CRON_PYTHON $INSTALL_DIR/domainmonitor.py --daemon
+User=root
+WorkingDirectory=$INSTALL_DIR
+Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/domainmonitor.py
 Restart=always
-RestartSec=300
+RestartSec=30
+StandardOutput=append:$INSTALL_DIR/logs/domainmonitor.log
+StandardError=append:$INSTALL_DIR/logs/domainmonitor.error.log
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 EOF
-        
-        systemctl --user daemon-reload
-        systemctl --user enable domainmonitor.service
-        systemctl --user start domainmonitor.service
-        
-        print_msg "$GREEN" "✅ Systemd 服务已创建并启动"
-    else
-        # 使用 crontab
-        CRON_CMD="*/30 * * * * $CRON_PYTHON $INSTALL_DIR/domainmonitor.py --check >/dev/null 2>&1"
-        (crontab -l 2>/dev/null | grep -v "domainmonitor.py"; echo "$CRON_CMD") | crontab -
-        
-        print_msg "$GREEN" "✅ Crontab 定时任务已设置 (每30分钟检查一次)"
-    fi
+    
+    # 重载 systemd
+    systemctl daemon-reload
+    
+    # 启用服务
+    systemctl enable ${SERVICE_NAME}.service
+    
+    print_msg "✓ 系统服务创建完成" "$GREEN"
 }
 
 # 显示安装摘要
 show_summary() {
     echo
-    print_msg "$PURPLE" "=========================================="
-    print_msg "$GREEN" "🎉 Domain Monitor 安装成功！"
-    print_msg "$PURPLE" "=========================================="
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║                    安装完成！                             ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo
-    print_msg "$CYAN" "📋 安装摘要："
-    print_msg "$YELLOW" "  • 安装目录: $INSTALL_DIR"
-    print_msg "$YELLOW" "  • 配置文件: $CONFIG_FILE"
-    print_msg "$YELLOW" "  • 日志目录: $LOG_DIR"
-    print_msg "$YELLOW" "  • 监控域名: ${#domains[@]} 个"
-    
-    if [ -n "$bot_token" ]; then
-        print_msg "$YELLOW" "  • Telegram: 已配置"
-    else
-        print_msg "$YELLOW" "  • Telegram: 未配置"
-    fi
-    
+    echo -e "${GREEN}安装路径:${NC} $INSTALL_DIR"
+    echo -e "${GREEN}配置文件:${NC} $INSTALL_DIR/config/config.json"
+    echo -e "${GREEN}日志文件:${NC} $INSTALL_DIR/logs/"
     echo
-    print_msg "$CYAN" "🚀 使用方法："
-    print_msg "$GREEN" "  运行 domainmonitor 进入管理菜单"
+    echo -e "${YELLOW}常用命令：${NC}"
+    echo -e "  ${CYAN}domainctl start${NC}    - 启动服务"
+    echo -e "  ${CYAN}domainctl stop${NC}     - 停止服务"
+    echo -e "  ${CYAN}domainctl status${NC}   - 查看状态"
+    echo -e "  ${CYAN}domainctl add${NC}      - 添加域名"
+    echo -e "  ${CYAN}domainctl remove${NC}   - 删除域名"
+    echo -e "  ${CYAN}domainctl list${NC}     - 列出域名"
+    echo -e "  ${CYAN}domainctl check${NC}    - 立即检查"
+    echo -e "  ${CYAN}domainctl logs${NC}     - 查看日志"
     echo
-    print_msg "$BLUE" "💡 提示："
-    
-    # 检查 PATH
-    if [ -n "$LOCAL_BIN_PATH" ]; then
-        if ! echo "$PATH" | grep -q "$LOCAL_BIN_PATH"; then
-            print_msg "$YELLOW" "  • 首次运行需要刷新 PATH，请运行以下命令："
-            print_msg "$CYAN" "    export PATH=\"\$PATH:$LOCAL_BIN_PATH\""
-            print_msg "$YELLOW" "    或重新打开终端"
-        fi
-    else
-        print_msg "$YELLOW" "  • 运行程序: $INSTALL_DIR/bin/domainmonitor"
-    fi
-    
-    print_msg "$YELLOW" "  • 查看日志: tail -f $LOG_DIR/domainmonitor.log"
-    print_msg "$YELLOW" "  • 获取帮助: domainmonitor --help"
-    
-    if [ "$USE_VENV" = true ]; then
-        print_msg "$YELLOW" "  • 程序使用虚拟环境运行，无需担心依赖冲突"
-    fi
+    echo -e "${PURPLE}GitHub: ${GITHUB_URL}${NC}"
     echo
 }
 
-# 主安装流程
+# 询问是否启动服务
+ask_start_service() {
+    echo
+    read -p "是否立即启动监控服务？[Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+        systemctl start ${SERVICE_NAME}
+        print_msg "✓ 服务已启动" "$GREEN"
+        systemctl status ${SERVICE_NAME} --no-pager
+    fi
+}
+
+# 主函数
 main() {
     clear
-    print_title
-    
-    # 检查系统要求
-    check_python
-    check_pip
-    
-    # 检查是否已安装
-    if [ -d "$INSTALL_DIR" ]; then
-        print_msg "$YELLOW" "⚠️  检测到已有安装"
-        read -p "$(echo -e ${CYAN}"是否覆盖安装？(y/N): "${NC})" -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_msg "$YELLOW" "安装已取消"
-            exit 0
-        fi
-        rm -rf "$INSTALL_DIR"
-    fi
+    print_header
     
     # 执行安装步骤
+    check_requirements
     create_directories
-    install_dependencies
-    download_main_program
-    create_management_script
-    configure_initial_settings
-    setup_cron
+    download_program
+    setup_python_env
+    configure_telegram
+    add_initial_domains
+    create_service
     
-    # 显示安装摘要
+    # 显示摘要
     show_summary
+    
+    # 询问是否启动
+    ask_start_service
+    
+    print_msg "\n🎉 DomainMonitor 安装成功！" "$GREEN"
 }
 
 # 运行主函数

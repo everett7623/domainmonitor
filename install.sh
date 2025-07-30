@@ -5,7 +5,7 @@
 # 功能: 自动监控域名注册状态，支持Telegram Bot通知
 # 作者: everett7623
 # 版本: 2.0.0
-# 更新: 2025-01-29
+# 更新: 2025-07-30
 # ==============================================================================
 
 # 颜色定义
@@ -198,7 +198,7 @@ class DomainMonitor:
             self.config = {
                 'telegram': {'bot_token': '', 'chat_id': ''},
                 'check_interval': 60,
-                'notify_days_before_expiry': [30, 7, 3, 1]
+                'notify_days_before_expiry':
             }
             
     def load_history(self):
@@ -332,7 +332,7 @@ class DomainMonitor:
             line_lower = line.lower()
             for keyword in expiry_keywords:
                 if keyword in line_lower:
-                    date_str = line.split(':', 1)[1].strip()
+                    date_str = line.split(':', 1).strip()
                     # 尝试多种日期格式
                     for fmt in [
                         '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d', '%d/%m/%Y',
@@ -340,7 +340,7 @@ class DomainMonitor:
                         '%Y-%m-%dT%H:%M:%S%z'
                     ]:
                         try:
-                            return datetime.strptime(date_str.split()[0], fmt)
+                            return datetime.strptime(date_str.split(), fmt)
                         except:
                             continue
         return None
@@ -420,7 +420,7 @@ class DomainMonitor:
                 
         # 即将过期提醒
         if status == 'registered' and days_until_expiry is not None:
-            notify_days = self.config.get('notify_days_before_expiry', [30, 7, 3, 1])
+            notify_days = self.config.get('notify_days_before_expiry',)
             for days in notify_days:
                 if days_until_expiry == days:
                     last_notify_key = f'notified_{days}d'
@@ -466,7 +466,7 @@ class DomainMonitor:
                         
                         # 记录特定天数的通知
                         if days_until_expiry is not None:
-                            for days in self.config.get('notify_days_before_expiry', [30, 7, 3, 1]):
+                            for days in self.config.get('notify_days_before_expiry',):
                                 if days_until_expiry == days:
                                     self.history[domain][f'notified_{days}d'] = True
                     else:
@@ -482,7 +482,7 @@ class DomainMonitor:
                 
                 # 清理过期的通知标记
                 if status == 'available' or (days_until_expiry and days_until_expiry > 30):
-                    for days in [30, 7, 3, 1]:
+                    for days in:
                         self.history[domain].pop(f'notified_{days}d', None)
                 
             except Exception as e:
@@ -1259,6 +1259,16 @@ EOF
     print_success "配置初始化完成"
 }
 
+# 验证域名格式（用于向导）
+validate_domain() {
+    local domain=$1
+    if [[ $domain =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # 配置向导
 configuration_wizard() {
     echo -e "${BLUE}========================================${NC}"
@@ -1349,16 +1359,6 @@ with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
 "
         print_success "检查间隔设置为 $interval 分钟"
-    fi
-}
-
-# 验证域名格式（用于向导）
-validate_domain() {
-    local domain=$1
-    if [[ $domain =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
-        return 0
-    else
-        return 1
     fi
 }
 

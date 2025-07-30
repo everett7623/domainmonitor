@@ -28,6 +28,8 @@ CONFIG_FILE="$INSTALL_DIR/config.json"
 LOG_DIR="$INSTALL_DIR/logs"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/everett7623/domainmonitor/main"
 PYTHON_MIN_VERSION="3.7"
+USE_VENV=false
+VENV_DIR="$INSTALL_DIR/venv"
 
 # 打印带颜色的消息
 print_msg() {
@@ -87,12 +89,27 @@ check_python() {
 check_pip() {
     print_msg "$BLUE" "🔍 检查 pip..."
     
-    if ! $PYTHON_CMD -m pip --version >/dev/null 2>&1; then
-        print_msg "$YELLOW" "⚠️  未找到 pip，正在安装..."
-        curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON_CMD || error_exit "pip 安装失败"
+    # 检查是否在外部管理的环境中
+    if $PYTHON_CMD -c "import sys; sys.exit(0 if hasattr(sys, '_base_executable') else 1)" 2>/dev/null; then
+        USE_VENV=true
+        print_msg "$YELLOW" "⚠️  检测到外部管理的 Python 环境，将使用虚拟环境"
     fi
     
-    print_msg "$GREEN" "✅ pip 已就绪"
+    if ! $PYTHON_CMD -m pip --version >/dev/null 2>&1; then
+        if [ "$USE_VENV" = true ]; then
+            print_msg "$YELLOW" "⚠️  将在虚拟环境中安装"
+        else
+            print_msg "$YELLOW" "⚠️  未找到 pip，正在安装..."
+            curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON_CMD --user 2>/dev/null || {
+                print_msg "$YELLOW" "⚠️  标准安装失败，尝试其他方法..."
+                USE_VENV=true
+            }
+        fi
+    fi
+    
+    if [ "$USE_VENV" != true ]; then
+        print_msg "$GREEN" "✅ pip 已就绪"
+    fi
 }
 
 # 创建目录结构
@@ -102,6 +119,23 @@ create_directories() {
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$LOG_DIR"
     mkdir -p "$INSTALL_DIR/bin"
+    
+    # 如果需要虚拟环境，创建它
+    if [ "$USE_VENV" = true ]; then
+        print_msg "$YELLOW" "🔧 创建虚拟环境..."
+        $PYTHON_CMD -m venv "$VENV_DIR" || error_exit "创建虚拟环境失败"
+        
+        # 更新 Python 命令为虚拟环境中的 Python
+        PYTHON_CMD="$VENV_DIR/bin/python"
+        PIP_CMD="$VENV_DIR/bin/pip"
+        
+        # 升级虚拟环境中的 pip
+        $PYTHON_CMD -m pip install --upgrade pip >/dev/null 2>&1
+        
+        print_msg "$GREEN" "✅ 虚拟环境创建成功"
+    else
+        PIP_CMD="$PYTHON_CMD -m pip"
+    fi
     
     print_msg "$GREEN" "✅ 目录创建成功"
 }
@@ -121,7 +155,11 @@ tabulate>=0.9.0
 EOF
     
     # 安装依赖
-    $PYTHON_CMD -m pip install -r "$INSTALL_DIR/requirements.txt" --user || error_exit "依赖安装失败"
+    if [ "$USE_VENV" = true ]; then
+        $PIP_CMD install -r "$INSTALL_DIR/requirements.txt" || error_exit "依赖安装失败"
+    else
+        $PIP_CMD install -r "$INSTALL_DIR/requirements.txt" --user || error_exit "依赖安装失败"
+    fi
     
     print_msg "$GREEN" "✅ 依赖安装成功"
 }
@@ -143,19 +181,30 @@ download_main_program() {
 create_management_script() {
     print_msg "$BLUE" "🔧 创建管理脚本..."
     
-    cat > "$INSTALL_DIR/bin/domainmonitor" << EOF
+    # 根据是否使用虚拟环境创建不同的脚本
+    if [ "$USE_VENV" = true ]; then
+        cat > "$INSTALL_DIR/bin/domainmonitor" << EOF
+#!/bin/bash
+cd "$INSTALL_DIR"
+"$VENV_DIR/bin/python" domainmonitor.py "\$@"
+EOF
+    else
+        cat > "$INSTALL_DIR/bin/domainmonitor" << EOF
 #!/bin/bash
 cd "$INSTALL_DIR"
 $PYTHON_CMD domainmonitor.py "\$@"
 EOF
+    fi
     
     chmod +x "$INSTALL_DIR/bin/domainmonitor"
     
     # 创建软链接
     if [ -d "$HOME/.local/bin" ]; then
         ln -sf "$INSTALL_DIR/bin/domainmonitor" "$HOME/.local/bin/domainmonitor"
+        LOCAL_BIN_PATH="$HOME/.local/bin"
     elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
         ln -sf "$INSTALL_DIR/bin/domainmonitor" "/usr/local/bin/domainmonitor"
+        LOCAL_BIN_PATH="/usr/local/bin"
     fi
     
     print_msg "$GREEN" "✅ 管理脚本创建成功"
@@ -193,8 +242,60 @@ configure_initial_settings() {
         read -p "$(echo -e ${CYAN}"Chat ID: "${NC})" chat_id
     fi
     
+    # 检查是否安装了 jq
+    if ! command_exists jq; then
+        print_msg "$YELLOW" "⚠️  检测到缺少 jq 工具，尝试安装..."
+        if command_exists apt-get; then
+            sudo apt-get update && sudo apt-get install -y jq 2>/dev/null || {
+                print_msg "$YELLOW" "⚠️  无法自动安装 jq，将使用 Python 生成配置"
+                USE_PYTHON_FOR_CONFIG=true
+            }
+        elif command_exists yum; then
+            sudo yum install -y jq 2>/dev/null || USE_PYTHON_FOR_CONFIG=true
+        elif command_exists brew; then
+            brew install jq 2>/dev/null || USE_PYTHON_FOR_CONFIG=true
+        else
+            USE_PYTHON_FOR_CONFIG=true
+        fi
+    fi
+    
     # 创建配置文件
-    cat > "$CONFIG_FILE" << EOF
+    if [ "$USE_PYTHON_FOR_CONFIG" = true ]; then
+        # 使用 Python 生成 JSON
+        $PYTHON_CMD << EOF
+import json
+config = {
+    "domains": $(printf '[%s]' "$(printf '"%s",' "${domains[@]}" | sed 's/,$//')"),
+    "telegram": {
+        "bot_token": "$bot_token",
+        "chat_id": "$chat_id"
+    },
+    "check_interval": 3600,
+    "log_level": "INFO",
+    "registrars": [
+        {
+            "name": "Namecheap",
+            "url": "https://www.namecheap.com",
+            "features": ["价格优惠", "免费隐私保护", "支持支付宝"]
+        },
+        {
+            "name": "Cloudflare",
+            "url": "https://www.cloudflare.com/products/registrar/",
+            "features": ["成本价注册", "免费 CDN", "无隐藏费用"]
+        },
+        {
+            "name": "阿里云",
+            "url": "https://wanwang.aliyun.com",
+            "features": ["国内访问快", "中文支持", "企业服务"]
+        }
+    ]
+}
+with open("$CONFIG_FILE", "w", encoding="utf-8") as f:
+    json.dump(config, f, indent=4, ensure_ascii=False)
+EOF
+    else
+        # 使用 jq 生成 JSON
+        cat > "$CONFIG_FILE" << EOF
 {
     "domains": $(printf '%s\n' "${domains[@]}" | jq -R . | jq -s .),
     "telegram": {
@@ -222,6 +323,7 @@ configure_initial_settings() {
     ]
 }
 EOF
+    fi
     
     print_msg "$GREEN" "✅ 配置文件创建成功"
 }
@@ -230,8 +332,16 @@ EOF
 setup_cron() {
     print_msg "$BLUE" "⏰ 设置定时任务..."
     
+    # 确定 Python 路径
+    if [ "$USE_VENV" = true ]; then
+        CRON_PYTHON="$VENV_DIR/bin/python"
+    else
+        CRON_PYTHON="$PYTHON_CMD"
+    fi
+    
     # 创建 systemd service (如果支持)
     if command_exists systemctl && [ -d "$HOME/.config/systemd/user" ]; then
+        mkdir -p "$HOME/.config/systemd/user"
         cat > "$HOME/.config/systemd/user/domainmonitor.service" << EOF
 [Unit]
 Description=Domain Monitor Service
@@ -239,7 +349,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$PYTHON_CMD $INSTALL_DIR/domainmonitor.py --daemon
+ExecStart=$CRON_PYTHON $INSTALL_DIR/domainmonitor.py --daemon
 Restart=always
 RestartSec=300
 
@@ -254,7 +364,7 @@ EOF
         print_msg "$GREEN" "✅ Systemd 服务已创建并启动"
     else
         # 使用 crontab
-        CRON_CMD="*/30 * * * * $PYTHON_CMD $INSTALL_DIR/domainmonitor.py --check >/dev/null 2>&1"
+        CRON_CMD="*/30 * * * * $CRON_PYTHON $INSTALL_DIR/domainmonitor.py --check >/dev/null 2>&1"
         (crontab -l 2>/dev/null | grep -v "domainmonitor.py"; echo "$CRON_CMD") | crontab -
         
         print_msg "$GREEN" "✅ Crontab 定时任务已设置 (每30分钟检查一次)"
@@ -285,9 +395,24 @@ show_summary() {
     print_msg "$GREEN" "  运行 domainmonitor 进入管理菜单"
     echo
     print_msg "$BLUE" "💡 提示："
-    print_msg "$YELLOW" "  • 首次运行可能需要重新加载终端或运行: source ~/.bashrc"
+    
+    # 检查 PATH
+    if [ -n "$LOCAL_BIN_PATH" ]; then
+        if ! echo "$PATH" | grep -q "$LOCAL_BIN_PATH"; then
+            print_msg "$YELLOW" "  • 首次运行需要刷新 PATH，请运行以下命令："
+            print_msg "$CYAN" "    export PATH=\"\$PATH:$LOCAL_BIN_PATH\""
+            print_msg "$YELLOW" "    或重新打开终端"
+        fi
+    else
+        print_msg "$YELLOW" "  • 运行程序: $INSTALL_DIR/bin/domainmonitor"
+    fi
+    
     print_msg "$YELLOW" "  • 查看日志: tail -f $LOG_DIR/domainmonitor.log"
     print_msg "$YELLOW" "  • 获取帮助: domainmonitor --help"
+    
+    if [ "$USE_VENV" = true ]; then
+        print_msg "$YELLOW" "  • 程序使用虚拟环境运行，无需担心依赖冲突"
+    fi
     echo
 }
 

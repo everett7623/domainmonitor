@@ -5,7 +5,7 @@
 # 功能: 自动监控域名注册状态，支持Telegram Bot通知
 # 作者: everett7623
 # 版本: 2.0.0
-# 更新: 2025-07-30
+# 更新: 2025-01-29
 # ==============================================================================
 
 # 颜色定义
@@ -146,6 +146,8 @@ create_builtin_monitor() {
 """
 域名监控系统主程序
 支持自动检测域名注册状态并通过Telegram Bot发送通知
+作者: everett7623
+版本: 2.0.0
 """
 
 import json
@@ -274,11 +276,33 @@ class DomainMonitor:
         except Exception as e:
             logging.error(f"requests发送失败: {e}")
             
+        # 方法3: 使用curl命令
+        try:
+            cmd = [
+                'curl', '-s', '-X', 'POST',
+                f'https://api.telegram.org/bot{bot_token}/sendMessage',
+                '-d', f'chat_id={chat_id}',
+                '-d', f'text={message}',
+                '-d', 'parse_mode=HTML',
+                '-d', 'disable_web_page_preview=true'
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                logging.info("Telegram通知发送成功 (使用curl)")
+                return True
+            else:
+                logging.error(f"curl发送失败: {result.stderr}")
+                
+        except Exception as e:
+            logging.error(f"curl命令执行失败: {e}")
+            
         return False
         
     def check_domain_whois(self, domain: str) -> Tuple[str, Optional[datetime], Optional[int]]:
         """使用whois命令检查域名状态"""
         try:
+            # 执行whois命令
             result = subprocess.run(
                 ['whois', domain],
                 capture_output=True,
@@ -295,7 +319,8 @@ class DomainMonitor:
             not_found_keywords = [
                 'no found', 'not found', 'no match', 'not registered',
                 'available', 'free', 'no data found', 'domain not found',
-                'no entries found', 'status: free', 'not exist'
+                'no entries found', 'status: free', 'not exist',
+                'no matching record', 'domain status: available'
             ]
             
             for keyword in not_found_keywords:
@@ -324,7 +349,8 @@ class DomainMonitor:
         expiry_keywords = [
             'expiry date:', 'expires on:', 'expiration date:',
             'expire:', 'exp date:', 'expires:', 'expiry:',
-            'registry expiry date:', 'registrar registration expiration date:'
+            'registry expiry date:', 'registrar registration expiration date:',
+            'paid-till:', 'valid until:', 'renewal date:'
         ]
         
         lines = whois_text.split('\n')
@@ -332,17 +358,34 @@ class DomainMonitor:
             line_lower = line.lower()
             for keyword in expiry_keywords:
                 if keyword in line_lower:
+                    # 提取日期部分
                     date_str = line.split(':', 1)[1].strip()
+                    
                     # 尝试多种日期格式
-                    for fmt in [
+                    date_formats = [
                         '%Y-%m-%d', '%d-%m-%Y', '%Y/%m/%d', '%d/%m/%Y',
                         '%Y.%m.%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%SZ',
-                        '%Y-%m-%dT%H:%M:%S%z'
-                    ]:
+                        '%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%d %H:%M:%S',
+                        '%d-%b-%Y', '%d %b %Y', '%Y%m%d'
+                    ]
+                    
+                    for fmt in date_formats:
                         try:
-                            return datetime.strptime(date_str.split()[0], fmt)
+                            # 处理可能包含的额外信息
+                            clean_date = date_str.split()[0]
+                            return datetime.strptime(clean_date, fmt)
                         except:
                             continue
+                            
+                    # 尝试处理特殊格式
+                    try:
+                        # 处理类似 "2025-01-29T00:00:00Z" 的格式
+                        if 'T' in date_str:
+                            clean_date = date_str.split('.')[0].replace('Z', '')
+                            return datetime.strptime(clean_date, '%Y-%m-%dT%H:%M:%S')
+                    except:
+                        pass
+                        
         return None
         
     def format_notification(self, domain: str, status: str, expiry_date: Optional[datetime], 
@@ -360,7 +403,8 @@ class DomainMonitor:
             message += f"• <a href='https://www.namecheap.com/domains/registration/results/?domain={domain}'>Namecheap</a> - 价格实惠\n"
             message += f"• <a href='https://www.godaddy.com/domainsearch/find?domainToCheck={domain}'>GoDaddy</a> - 全球最大\n"
             message += f"• <a href='https://www.cloudflare.com/products/registrar/'>Cloudflare</a> - 成本价\n"
-            message += f"• <a href='https://porkbun.com/checkout/search?q={domain}'>Porkbun</a> - 性价比高\n\n"
+            message += f"• <a href='https://porkbun.com/checkout/search?q={domain}'>Porkbun</a> - 性价比高\n"
+            message += f"• <a href='https://www.namesilo.com/domain/search-domains?query={domain}'>NameSilo</a> - 价格便宜\n\n"
             message += f"<b>💡 注册建议:</b>\n"
             message += f"• 建议注册5-10年获得优惠\n"
             message += f"• 开启域名隐私保护(WHOIS Privacy)\n"
@@ -376,10 +420,14 @@ class DomainMonitor:
                 if days_until_expiry is not None:
                     if days_until_expiry < 0:
                         message += f"<b>状态:</b> 💀 已过期 {abs(days_until_expiry)} 天\n"
-                        message += f"\n⚠️ <b>域名已过期，可能即将释放！</b>"
+                        message += f"\n⚠️ <b>域名已过期，可能即将释放！</b>\n"
+                        message += f"建议增加检查频率，密切关注释放时间。"
                     elif days_until_expiry == 0:
                         message += f"<b>状态:</b> 🔥 <b>今天过期！</b>\n"
                         message += f"\n⚠️ <b>密切关注，可能随时释放！</b>"
+                    elif days_until_expiry == 1:
+                        message += f"<b>剩余天数:</b> 🔥 <b>仅剩 1 天！明天过期！</b>\n"
+                        message += f"\n⚠️ <b>域名即将过期，请做好抢注准备！</b>"
                     elif days_until_expiry < 7:
                         message += f"<b>剩余天数:</b> 🔥 仅剩 {days_until_expiry} 天！\n"
                         message += f"\n⚠️ <b>即将过期，请密切关注！</b>"
@@ -409,9 +457,12 @@ class DomainMonitor:
             
         # 域名可注册且24小时未通知
         if status == 'available' and last_notified:
-            last_notified_time = datetime.fromisoformat(last_notified)
-            if (datetime.now() - last_notified_time).total_seconds() > 86400:
-                return True, "定期提醒(24小时)"
+            try:
+                last_notified_time = datetime.fromisoformat(last_notified)
+                if (datetime.now() - last_notified_time).total_seconds() > 86400:
+                    return True, "定期提醒(24小时)"
+            except:
+                pass
                 
         # 域名已过期
         if status == 'registered' and days_until_expiry is not None and days_until_expiry < 0:
@@ -441,6 +492,7 @@ class DomainMonitor:
         checked = 0
         available = 0
         expiring = 0
+        errors = 0
         
         for domain in domains:
             logging.info(f"正在检查域名: {domain}")
@@ -450,6 +502,8 @@ class DomainMonitor:
                 
                 if status == 'available':
                     available += 1
+                elif status == 'error':
+                    errors += 1
                 elif days_until_expiry is not None and days_until_expiry < 30:
                     expiring += 1
                     
@@ -487,25 +541,30 @@ class DomainMonitor:
                 
             except Exception as e:
                 logging.error(f"检查域名 {domain} 时发生错误: {e}")
+                errors += 1
                 
             # 避免请求过快
             time.sleep(2)
             
         self.save_history()
         
-        # 发送检查摘要
-        summary = (
-            f"<b>📊 域名检查完成</b>\n\n"
-            f"检查域名: {checked} 个\n"
-            f"可注册: {available} 个\n"
-            f"即将过期: {expiring} 个\n"
-            f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        
-        if available > 0 or expiring > 0:
+        # 发送检查摘要（仅在有重要信息时）
+        if available > 0 or expiring > 0 or errors > 0:
+            summary = f"<b>📊 域名检查完成</b>\n\n"
+            summary += f"检查域名: {checked} 个\n"
+            
+            if available > 0:
+                summary += f"✅ 可注册: {available} 个\n"
+            if expiring > 0:
+                summary += f"⚠️ 即将过期: {expiring} 个\n"
+            if errors > 0:
+                summary += f"❌ 检查失败: {errors} 个\n"
+                
+            summary += f"\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
             self.send_telegram_notification(summary)
             
-        logging.info(f"域名检查完成 - 检查: {checked}, 可注册: {available}, 即将过期: {expiring}")
+        logging.info(f"域名检查完成 - 检查: {checked}, 可注册: {available}, 即将过期: {expiring}, 错误: {errors}")
         
     def test_notification(self):
         """测试通知功能"""
@@ -514,7 +573,8 @@ class DomainMonitor:
             "✅ Telegram通知配置成功！\n"
             f"🕐 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"⏰ 检查间隔: {self.config.get('check_interval', 60)} 分钟\n"
-            f"📋 监控域名: {len(self.load_domains())} 个\n\n"
+            f"📋 监控域名: {len(self.load_domains())} 个\n"
+            f"📅 到期提醒: {', '.join(map(str, self.config.get('notify_days_before_expiry', [30, 7, 3, 1])))} 天\n\n"
             "系统正在正常运行..."
         )
         
@@ -529,10 +589,13 @@ class DomainMonitor:
         """运行监控"""
         logging.info("域名监控服务启动")
         logging.info(f"检查间隔: {self.config.get('check_interval', 60)} 分钟")
+        logging.info(f"监控域名数量: {len(self.load_domains())}")
         
         # 测试通知
         if self.config.get('telegram', {}).get('bot_token'):
             self.test_notification()
+        else:
+            logging.warning("未配置Telegram通知")
             
         # 立即执行一次检查
         self.check_all_domains()
@@ -880,7 +943,6 @@ try:
 except:
     print("暂无历史记录")
 EOF
-    fi
 }
 
 check_status() {
@@ -1258,16 +1320,6 @@ EOF
     print_success "配置初始化完成"
 }
 
-# 验证域名格式（用于向导）
-validate_domain() {
-    local domain=$1
-    if [[ $domain =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
 # 配置向导
 configuration_wizard() {
     echo -e "${BLUE}========================================${NC}"
@@ -1353,11 +1405,21 @@ with open('$CONFIG_FILE', 'w') as f:
 import json
 with open('$CONFIG_FILE', 'r') as f:
     config = json.load(f)
-config['check_interval'] = int($interval)
+config['check_interval'] = $interval
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
 "
         print_success "检查间隔设置为 $interval 分钟"
+    fi
+}
+
+# 验证域名格式（用于向导）
+validate_domain() {
+    local domain=$1
+    if [[ $domain =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
+        return 0
+    else
+        return 1
     fi
 }
 

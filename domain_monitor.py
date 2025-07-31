@@ -5,7 +5,7 @@ DomainMonitor - 域名状态监控系统主程序
 
 作者: everett7623
 GitHub: https://github.com/everett7623/domainmonitor
-版本: v2.0.0
+版本: v1.0.1
 
 功能特点:
 - 🔍 自动检测域名注册状态
@@ -62,7 +62,9 @@ class DomainMonitor:
         )
         self.domain_history = self.load_history()
         self.check_interval = self.config.get("check_interval", 300)
-        self.first_run = not bool(self.domain_history)  # 判断是否首次运行
+        # 记录启动时的域名列表，用于检测新增域名
+        self.startup_domains = set(self.config.get("domains", []))
+        self.check_count = 0
         
     def load_config(self) -> dict:
         """加载配置文件"""
@@ -72,6 +74,31 @@ class DomainMonitor:
         except Exception as e:
             logger.error(f"加载配置文件失败: {e}")
             sys.exit(1)
+            
+    def reload_config(self):
+        """重新加载配置文件（检测配置变化）"""
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                new_config = json.load(f)
+                
+            # 检测新增的域名
+            current_domains = set(new_config.get("domains", []))
+            new_domains = current_domains - self.startup_domains
+            
+            if new_domains:
+                logger.info(f"检测到新增域名: {new_domains}")
+                # 发送新增域名通知
+                for domain in new_domains:
+                    self.send_new_domain_notification(domain)
+                    
+                # 更新启动域名列表
+                self.startup_domains = current_domains
+                
+            self.config = new_config
+            return True
+        except Exception as e:
+            logger.error(f"重新加载配置文件失败: {e}")
+            return False
             
     def save_config(self):
         """保存配置文件"""
@@ -108,6 +135,7 @@ class DomainMonitor:
         状态: available, registered, error
         """
         try:
+            logger.info(f"正在检查域名: {domain}")
             # 使用 whois 查询
             w = whois.whois(domain)
             
@@ -139,16 +167,20 @@ class DomainMonitor:
             
     def check_all_domains(self):
         """检查所有域名"""
-        logger.info("开始检查所有域名...")
+        logger.info(f"第 {self.check_count + 1} 次检查开始...")
         
-        # 如果是首次运行，发送初始状态报告
-        if self.first_run:
-            self.send_initial_report()
-            self.first_run = False
+        # 每次检查前重新加载配置，以检测新增域名
+        self.reload_config()
         
-        check_results = []  # 收集检查结果
+        domains = self.config.get("domains", [])
+        if not domains:
+            logger.warning("没有配置监控域名")
+            return
+            
+        check_results = []
+        status_changed = False
         
-        for domain in self.config.get("domains", []):
+        for domain in domains:
             try:
                 status, info = self.check_domain_status(domain)
                 current_time = datetime.now().isoformat()
@@ -160,8 +192,10 @@ class DomainMonitor:
                         "last_check": current_time,
                         "status_history": [],
                         "last_status": None,
-                        "notification_sent": {}  # 记录已发送的通知
+                        "notified": False  # 添加通知标记
                     }
+                    # 首次检查域名，立即发送状态通知
+                    self.send_first_check_notification(domain, status, info)
                 
                 # 更新历史记录
                 history = self.domain_history[domain]
@@ -171,12 +205,12 @@ class DomainMonitor:
                 check_results.append({
                     "domain": domain,
                     "status": status,
-                    "previous_status": history["last_status"],
                     "info": info
                 })
                 
                 # 检测状态变化
                 if history["last_status"] != status:
+                    status_changed = True
                     history["status_history"].append({
                         "time": current_time,
                         "status": status,
@@ -184,78 +218,111 @@ class DomainMonitor:
                     })
                     
                     # 发送状态变化通知
-                    self.send_status_change_notification(domain, history["last_status"], status, info)
+                    if history["last_status"] is not None:
+                        self.send_status_change_notification(domain, history["last_status"], status, info)
                     
-                # 特殊通知逻辑
-                if status == "available" and not history.get("notification_sent", {}).get("available_alert", False):
-                    # 域名可注册时的特别通知
-                    self.send_available_notification(domain)
-                    history.setdefault("notification_sent", {})["available_alert"] = True
-                elif status == "registered":
-                    # 重置可注册通知标记
-                    if "notification_sent" in history:
-                        history["notification_sent"]["available_alert"] = False
-                    
-                    # 检查到期时间
-                    if info and info.get("expiration_date"):
-                        self.check_expiration(domain, info["expiration_date"])
+                    # 如果域名变为可注册，发送详细通知
+                    if status == "available":
+                        self.send_available_notification(domain)
+                        
+                # 检查到期时间
+                if status == "registered" and info and info.get("expiration_date"):
+                    self.check_expiration(domain, info["expiration_date"])
                         
                 history["last_status"] = status
-                
                 logger.info(f"域名 {domain} 状态: {status}")
                 
             except Exception as e:
                 logger.error(f"检查域名 {domain} 失败: {e}")
+                check_results.append({
+                    "domain": domain,
+                    "status": "error",
+                    "info": {"error": str(e)}
+                })
                 
         self.save_history()
+        self.check_count += 1
         
-        # 定期发送汇总报告（每6小时）
-        if hasattr(self, 'check_count'):
-            self.check_count += 1
-        else:
-            self.check_count = 1
-            
-        # 每72次检查（6小时，假设5分钟检查一次）发送一次汇总
-        if self.check_count % 72 == 0:
+        # 每10次检查（约50分钟）或有状态变化时发送汇总报告
+        if self.check_count % 10 == 0 or status_changed:
             self.send_summary_report(check_results)
             
-    def send_initial_report(self):
-        """发送初始状态报告"""
-        domains = self.config.get("domains", [])
-        
-        message = "🚀 <b>DomainMonitor 服务已启动</b>\n\n"
-        message += f"📊 <b>监控配置:</b>\n"
-        message += f"• 监控域名数: {len(domains)}\n"
-        message += f"• 检查间隔: {self.check_interval} 秒\n\n"
-        
-        if domains:
-            message += "<b>📋 监控域名列表:</b>\n"
-            for domain in domains:
-                message += f"• <code>{domain}</code>\n"
-        else:
-            message += "⚠️ 暂无监控域名\n"
-            
-        message += "\n<i>正在进行首次检查，稍后将发送状态报告...</i>"
-        
+    def send_new_domain_notification(self, domain: str):
+        """发送新增域名通知"""
+        message = f"""
+📌 <b>新增监控域名</b>
+
+🆕 <b>域名:</b> <code>{domain}</code>
+⏰ <b>添加时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+<i>正在检查域名状态，请稍候...</i>
+"""
         self.telegram_bot.send_message(message)
+        logger.info(f"已发送新增域名通知: {domain}")
+        
+    def send_first_check_notification(self, domain: str, status: str, info: dict):
+        """发送首次检查通知"""
+        status_emoji = {
+            "available": "🟢",
+            "registered": "🔴",
+            "error": "⚠️"
+        }
+        
+        status_text = {
+            "available": "可注册",
+            "registered": "已注册",
+            "error": "检查失败"
+        }
+        
+        emoji = status_emoji.get(status, "❓")
+        text = status_text.get(status, "未知")
+        
+        message = f"""
+🔍 <b>域名首次检查结果</b>
+
+📌 <b>域名:</b> <code>{domain}</code>
+{emoji} <b>状态:</b> {text}
+⏰ <b>检查时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        
+        # 如果是已注册域名，显示详细信息
+        if status == "registered" and info:
+            if info.get("registrar"):
+                message += f"\n🏢 <b>注册商:</b> {info['registrar']}"
+            if info.get("expiration_date"):
+                message += f"\n📅 <b>到期时间:</b> {info['expiration_date'][:10]}"
+                
+        # 如果是可注册域名，添加行动建议
+        elif status == "available":
+            message += "\n💡 <b>提示:</b> 该域名当前可以注册！"
+            
+        self.telegram_bot.send_message(message)
+        logger.info(f"已发送域名 {domain} 首次检查通知")
         
     def send_status_change_notification(self, domain: str, old_status: str, new_status: str, info: dict):
         """发送状态变化通知"""
-        # 状态映射
-        status_map = {
-            "available": "🟢 可注册",
-            "registered": "🔴 已注册",
-            "error": "⚠️ 检查失败"
+        status_emoji = {
+            "available": "🟢",
+            "registered": "🔴",
+            "error": "⚠️"
         }
         
-        old_status_text = status_map.get(old_status, "未知")
-        new_status_text = status_map.get(new_status, "未知")
+        status_text = {
+            "available": "可注册",
+            "registered": "已注册",
+            "error": "检查失败"
+        }
+        
+        old_emoji = status_emoji.get(old_status, "❓")
+        new_emoji = status_emoji.get(new_status, "❓")
+        old_text = status_text.get(old_status, "未知")
+        new_text = status_text.get(new_status, "未知")
         
         message = f"""
-📢 <b>域名状态变化通知</b>
+🔄 <b>域名状态变化</b>
 
 📌 <b>域名:</b> <code>{domain}</code>
-🔄 <b>状态变化:</b> {old_status_text} → {new_status_text}
+📊 <b>状态变化:</b> {old_emoji} {old_text} → {new_emoji} {new_text}
 ⏰ <b>检测时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
@@ -267,34 +334,45 @@ class DomainMonitor:
         elif new_status == "registered" and info:
             if info.get("registrar"):
                 message += f"\n🏢 <b>注册商:</b> {info['registrar']}"
-            if info.get("creation_date"):
-                message += f"\n📅 <b>注册时间:</b> {info['creation_date'][:10]}"
                 
         self.telegram_bot.send_message(message)
+        logger.info(f"已发送域名 {domain} 状态变化通知")
         
     def send_summary_report(self, check_results: List[Dict]):
-        """发送定期汇总报告"""
-        available_count = sum(1 for r in check_results if r["status"] == "available")
-        registered_count = sum(1 for r in check_results if r["status"] == "registered")
-        error_count = sum(1 for r in check_results if r["status"] == "error")
+        """发送汇总报告"""
+        available_domains = [r for r in check_results if r["status"] == "available"]
+        registered_domains = [r for r in check_results if r["status"] == "registered"]
+        error_domains = [r for r in check_results if r["status"] == "error"]
         
-        message = "📊 <b>域名监控定期报告</b>\n\n"
-        message += f"⏰ <b>报告时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        message += f"📈 <b>检查次数:</b> {self.check_count}\n\n"
+        message = f"""
+📊 <b>域名监控汇总报告</b>
+
+⏰ <b>报告时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+🔄 <b>检查次数:</b> 第 {self.check_count} 次
+📈 <b>检查间隔:</b> {self.check_interval} 秒
+
+<b>📋 统计信息:</b>
+• 总监控数: {len(check_results)} 个
+• 🟢 可注册: {len(available_domains)} 个
+• 🔴 已注册: {len(registered_domains)} 个"""
         
-        message += "<b>📋 域名状态汇总:</b>\n"
-        message += f"🟢 可注册: {available_count} 个\n"
-        message += f"🔴 已注册: {registered_count} 个\n"
-        if error_count > 0:
-            message += f"⚠️ 检查失败: {error_count} 个\n"
+        if error_domains:
+            message += f"\n• ⚠️ 检查失败: {len(error_domains)} 个"
             
-        message += "\n<b>详细状态:</b>\n"
-        for result in check_results:
-            status_emoji = {"available": "🟢", "registered": "🔴", "error": "⚠️"}
-            emoji = status_emoji.get(result["status"], "❓")
-            message += f"{emoji} <code>{result['domain']}</code>\n"
-            
+        # 列出可注册的域名
+        if available_domains:
+            message += "\n\n<b>🟢 可注册域名:</b>"
+            for result in available_domains:
+                message += f"\n• <code>{result['domain']}</code>"
+                
+        # 列出检查失败的域名
+        if error_domains:
+            message += "\n\n<b>⚠️ 检查失败域名:</b>"
+            for result in error_domains:
+                message += f"\n• <code>{result['domain']}</code>"
+                
         self.telegram_bot.send_message(message)
+        logger.info("已发送汇总报告")
             
     def check_expiration(self, domain: str, expiration_date: str):
         """检查域名是否即将到期"""
@@ -318,14 +396,14 @@ class DomainMonitor:
             
             # 30天内到期提醒
             if days_left <= 30 and days_left > 0:
-                # 检查是否已经发送过这个天数的提醒
+                # 检查是否已经发送过这个级别的提醒
                 history = self.domain_history.get(domain, {})
-                notifications = history.get("notification_sent", {})
-                notification_key = f"expiry_{days_left}"
+                last_expiry_notice = history.get("last_expiry_notice_days", 999)
                 
-                if not notifications.get(notification_key, False):
+                # 只在特定天数发送提醒，避免重复
+                if days_left in [30, 14, 7, 3, 1] and days_left < last_expiry_notice:
                     self.send_expiration_warning(domain, days_left)
-                    history.setdefault("notification_sent", {})[notification_key] = True
+                    history["last_expiry_notice_days"] = days_left
                     
         except Exception as e:
             logger.error(f"检查域名 {domain} 到期时间失败: {e}")
@@ -384,10 +462,32 @@ class DomainMonitor:
         """运行监控服务"""
         logger.info("DomainMonitor 服务已启动")
         
+        # 发送启动通知
+        domains = self.config.get("domains", [])
+        startup_message = f"""
+🚀 <b>DomainMonitor 服务已启动</b>
+
+📊 <b>监控配置:</b>
+• 监控域名数: {len(domains)}
+• 检查间隔: {self.check_interval} 秒
+
+📋 <b>监控域名列表:</b>
+"""
+        for domain in domains:
+            startup_message += f"\n• <code>{domain}</code>"
+            
+        if not domains:
+            startup_message += "\n<i>暂无监控域名</i>"
+            
+        self.telegram_bot.send_message(startup_message)
+        
+        # 立即进行首次检查
+        self.check_all_domains()
+        
         while True:
             try:
-                self.check_all_domains()
                 time.sleep(self.check_interval)
+                self.check_all_domains()
             except KeyboardInterrupt:
                 logger.info("收到停止信号，正在关闭...")
                 self.telegram_bot.send_message("🛑 <b>DomainMonitor 服务已停止</b>")
@@ -419,7 +519,7 @@ class TelegramBot:
             response = requests.post(url, json=data, timeout=10)
             
             if response.status_code == 200:
-                logger.debug("Telegram 消息发送成功")
+                logger.info("Telegram 消息发送成功")
             else:
                 logger.error(f"Telegram 消息发送失败: {response.text}")
                 

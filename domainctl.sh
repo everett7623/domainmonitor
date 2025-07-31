@@ -1,9 +1,10 @@
 #!/bin/bash
 # ================================================================================
-# DomainMonitor 管理脚本
+# DomainMonitor 管理工具
 # 
 # 作者: everett7623
 # GitHub: https://github.com/everett7623/domainmonitor
+# 版本: v2.0.0
 # 
 # 使用方法: domainctl [命令] [参数]
 # ================================================================================
@@ -34,27 +35,37 @@ check_installation() {
 
 # 显示帮助
 show_help() {
-    echo -e "${CYAN}DomainMonitor 管理工具${NC}"
+    echo -e "${CYAN}DomainMonitor 管理工具 v2.0${NC}"
     echo
     echo "使用方法: domainctl [命令] [参数]"
     echo
-    echo "命令列表:"
-    echo -e "  ${GREEN}start${NC}      启动监控服务"
-    echo -e "  ${GREEN}stop${NC}       停止监控服务"
-    echo -e "  ${GREEN}restart${NC}    重启监控服务"
-    echo -e "  ${GREEN}status${NC}     查看服务状态"
-    echo -e "  ${GREEN}add${NC}        添加监控域名"
-    echo -e "  ${GREEN}remove${NC}     删除监控域名"
-    echo -e "  ${GREEN}list${NC}       列出所有监控域名"
-    echo -e "  ${GREEN}check${NC}      立即检查所有域名"
-    echo -e "  ${GREEN}logs${NC}       查看日志"
-    echo -e "  ${GREEN}config${NC}     编辑配置文件"
-    echo -e "  ${GREEN}update${NC}     更新程序"
-    echo -e "  ${GREEN}uninstall${NC}  卸载程序"
+    echo -e "${GREEN}服务管理:${NC}"
+    echo -e "  ${CYAN}start${NC}      启动监控服务"
+    echo -e "  ${CYAN}stop${NC}       停止监控服务"
+    echo -e "  ${CYAN}restart${NC}    重启监控服务"
+    echo -e "  ${CYAN}status${NC}     查看服务状态"
+    echo
+    echo -e "${GREEN}域名管理:${NC}"
+    echo -e "  ${CYAN}add${NC}        添加监控域名"
+    echo -e "  ${CYAN}remove${NC}     删除监控域名"
+    echo -e "  ${CYAN}list${NC}       列出所有监控域名"
+    echo -e "  ${CYAN}check${NC}      立即检查所有域名"
+    echo -e "  ${CYAN}test${NC}       测试域名状态"
+    echo
+    echo -e "${GREEN}监控配置:${NC}"
+    echo -e "  ${CYAN}config${NC}     编辑配置文件"
+    echo -e "  ${CYAN}interval${NC}   修改检查间隔"
+    echo -e "  ${CYAN}report${NC}     发送状态报告"
+    echo -e "  ${CYAN}daily${NC}      设置每日报告"
+    echo
+    echo -e "${GREEN}系统维护:${NC}"
+    echo -e "  ${CYAN}logs${NC}       查看日志"
+    echo -e "  ${CYAN}update${NC}     更新程序"
+    echo -e "  ${CYAN}uninstall${NC}  卸载程序"
     echo
     echo "示例:"
     echo -e "  ${CYAN}domainctl add example.com${NC}"
-    echo -e "  ${CYAN}domainctl remove example.com${NC}"
+    echo -e "  ${CYAN}domainctl interval 180${NC}"
     echo -e "  ${CYAN}domainctl logs -f${NC}"
 }
 
@@ -112,15 +123,33 @@ show_status() {
     systemctl status $SERVICE_NAME
     
     echo
-    echo -e "${BLUE}▶ 监控域名统计${NC}"
-    if [[ -f "$CONFIG_FILE" ]]; then
-        DOMAIN_COUNT=$(cat "$CONFIG_FILE" | jq -r '.domains | length')
-        echo -e "监控域名数: ${GREEN}${DOMAIN_COUNT}${NC}"
-    fi
+    echo -e "${BLUE}▶ 监控统计${NC}"
+    
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    
+    python3 -c "
+import json
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+    
+    print(f'监控域名数: {len(config.get(\"domains\", []))}')
+    print(f'检查间隔: {config.get(\"check_interval\", 300)} 秒')
+    
+    if config.get('domains'):
+        print('\n监控域名:')
+        for domain in config['domains']:
+            print(f'  • {domain}')
+except Exception as e:
+    print(f'读取配置失败: {e}')
+"
+    
+    deactivate
     
     echo
     echo -e "${BLUE}▶ 最近日志${NC}"
-    tail -n 10 "$INSTALL_DIR/logs/domainmonitor.log"
+    tail -n 10 "$INSTALL_DIR/logs/domainmonitor.log" 2>/dev/null || echo "暂无日志"
 }
 
 # 添加域名
@@ -139,7 +168,6 @@ add_domain() {
     
     echo -e "${BLUE}▶ 添加域名: ${domain}${NC}"
     
-    # 使用 Python 脚本添加域名
     cd "$INSTALL_DIR"
     source venv/bin/activate
     
@@ -166,7 +194,6 @@ except Exception as e:
     
     deactivate
     
-    # 如果服务正在运行，重启以应用更改
     if systemctl is-active --quiet $SERVICE_NAME; then
         echo -e "${CYAN}正在重启服务以应用更改...${NC}"
         systemctl restart $SERVICE_NAME
@@ -191,7 +218,6 @@ remove_domain() {
     
     echo -e "${BLUE}▶ 删除域名: ${domain}${NC}"
     
-    # 使用 Python 脚本删除域名
     cd "$INSTALL_DIR"
     source venv/bin/activate
     
@@ -218,7 +244,6 @@ except Exception as e:
     
     deactivate
     
-    # 如果服务正在运行，重启以应用更改
     if systemctl is-active --quiet $SERVICE_NAME; then
         echo -e "${CYAN}正在重启服务以应用更改...${NC}"
         systemctl restart $SERVICE_NAME
@@ -229,26 +254,10 @@ except Exception as e:
 list_domains() {
     echo -e "${BLUE}▶ 监控域名列表${NC}"
     
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo -e "${RED}错误: 配置文件不存在${NC}"
-        exit 1
-    fi
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
     
-    # 使用 jq 解析 JSON
-    if command -v jq &> /dev/null; then
-        domains=$(cat "$CONFIG_FILE" | jq -r '.domains[]' 2>/dev/null)
-        
-        if [[ -z "$domains" ]]; then
-            echo -e "${YELLOW}暂无监控域名${NC}"
-        else
-            echo "$domains" | nl -w 3 -s '. '
-        fi
-    else
-        # 如果没有 jq，使用 Python
-        cd "$INSTALL_DIR"
-        source venv/bin/activate
-        
-        python3 -c "
+    python3 -c "
 import json
 with open('$CONFIG_FILE', 'r') as f:
     config = json.load(f)
@@ -260,9 +269,8 @@ else:
     for i, domain in enumerate(domains, 1):
         print(f'{i:3d}. {domain}')
 "
-        
-        deactivate
-    fi
+    
+    deactivate
 }
 
 # 立即检查
@@ -272,7 +280,6 @@ check_now() {
     cd "$INSTALL_DIR"
     source venv/bin/activate
     
-    # 创建一次性检查脚本
     cat > /tmp/check_once.py << 'EOF'
 import sys
 sys.path.append('/opt/domainmonitor')
@@ -287,6 +294,267 @@ EOF
     rm -f /tmp/check_once.py
     
     deactivate
+}
+
+# 测试域名
+test_domain() {
+    local domain="$1"
+    
+    if [[ -z "$domain" ]]; then
+        echo -e "${YELLOW}请输入要测试的域名:${NC}"
+        read -p "> " domain
+    fi
+    
+    if [[ -z "$domain" ]]; then
+        echo -e "${RED}错误: 域名不能为空${NC}"
+        exit 1
+    fi
+    
+    echo -e "${BLUE}▶ 测试域名: ${domain}${NC}"
+    
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    
+    python3 -c "
+import whois
+
+try:
+    print(f'正在检查域名: $domain')
+    w = whois.whois('$domain')
+    
+    if w.domain_name:
+        print(f'✓ 域名状态: 已注册')
+        print(f'  注册商: {w.registrar}')
+        if w.expiration_date:
+            print(f'  到期时间: {w.expiration_date}')
+        if w.name_servers:
+            print(f'  DNS服务器: {w.name_servers}')
+    else:
+        print(f'✓ 域名状态: 可注册')
+        
+except Exception as e:
+    print(f'✓ 域名状态: 可注册')
+    print(f'  (无法获取详细信息: {e})')
+"
+    
+    deactivate
+}
+
+# 修改检查间隔
+change_interval() {
+    local interval="$1"
+    
+    if [[ -z "$interval" ]]; then
+        echo -e "${BLUE}▶ 修改检查间隔${NC}"
+        echo -e "${YELLOW}建议设置:${NC}"
+        echo "  60 秒 - 紧急监控"
+        echo "  180 秒 - 积极监控（推荐）"
+        echo "  300 秒 - 标准监控（默认）"
+        echo "  600 秒 - 节省资源"
+        echo
+        read -p "请输入检查间隔（秒）[180]: " interval
+        interval=${interval:-180}
+    fi
+    
+    if ! [[ "$interval" =~ ^[0-9]+$ ]] || [ "$interval" -lt 30 ]; then
+        echo -e "${RED}错误: 间隔必须是大于30的数字${NC}"
+        exit 1
+    fi
+    
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    
+    python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['check_interval'] = $interval
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=4, ensure_ascii=False)
+print('✓ 检查间隔已更新为 $interval 秒')
+"
+    
+    deactivate
+    
+    if systemctl is-active --quiet $SERVICE_NAME; then
+        echo -e "${CYAN}正在重启服务以应用更改...${NC}"
+        systemctl restart $SERVICE_NAME
+    fi
+}
+
+# 发送状态报告
+send_report() {
+    echo -e "${BLUE}▶ 发送域名状态报告...${NC}"
+    
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    
+    cat > /tmp/status_report.py << 'EOF'
+import sys
+sys.path.append('/opt/domainmonitor')
+import json
+import requests
+import whois
+from datetime import datetime
+
+# 加载配置
+with open('/opt/domainmonitor/config/config.json', 'r') as f:
+    config = json.load(f)
+
+bot_token = config['telegram']['bot_token']
+chat_id = config['telegram']['chat_id']
+domains = config.get('domains', [])
+
+# 构建状态报告
+message = "📊 <b>域名监控状态报告</b>\n\n"
+message += f"⏰ <b>报告时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+message += f"🔄 <b>检查间隔:</b> {config.get('check_interval', 300)} 秒\n"
+message += f"📌 <b>监控域名:</b> {len(domains)} 个\n\n"
+
+if not domains:
+    message += "⚠️ 暂无监控域名"
+else:
+    message += "<b>域名状态详情:</b>\n"
+    
+    for domain in domains:
+        try:
+            w = whois.whois(domain)
+            
+            if w.domain_name:
+                status = "🔴 已注册"
+                if w.expiration_date:
+                    if isinstance(w.expiration_date, list):
+                        exp_date = w.expiration_date[0]
+                    else:
+                        exp_date = w.expiration_date
+                    
+                    if hasattr(exp_date, 'date'):
+                        days_left = (exp_date - datetime.now()).days
+                        status += f" (剩余 {days_left} 天)"
+            else:
+                status = "🟢 可注册"
+                
+        except:
+            status = "🟢 可注册"
+            
+        message += f"\n• <code>{domain}</code>\n  状态: {status}\n"
+
+# 发送消息
+url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+data = {
+    "chat_id": chat_id,
+    "text": message,
+    "parse_mode": "HTML",
+    "disable_web_page_preview": True
+}
+
+try:
+    response = requests.post(url, json=data, timeout=10)
+    if response.status_code == 200:
+        print("✓ 状态报告发送成功")
+    else:
+        print(f"✗ 发送失败: {response.text}")
+except Exception as e:
+    print(f"✗ 错误: {e}")
+EOF
+    
+    python3 /tmp/status_report.py
+    rm -f /tmp/status_report.py
+    
+    deactivate
+}
+
+# 设置每日报告
+setup_daily() {
+    echo -e "${BLUE}▶ 设置每日状态报告${NC}"
+    
+    # 创建每日报告脚本
+    cat > "$INSTALL_DIR/daily_report.py" << 'EOF'
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""每日状态报告脚本"""
+
+import sys
+sys.path.append('/opt/domainmonitor')
+import json
+import requests
+import whois
+from datetime import datetime
+from pathlib import Path
+
+# 加载配置
+CONFIG_FILE = Path("/opt/domainmonitor/config/config.json")
+with open(CONFIG_FILE, 'r') as f:
+    config = json.load(f)
+
+# 加载历史记录
+HISTORY_FILE = Path("/opt/domainmonitor/data/history.json")
+history = {}
+if HISTORY_FILE.exists():
+    with open(HISTORY_FILE, 'r') as f:
+        history = json.load(f)
+
+bot_token = config['telegram']['bot_token']
+chat_id = config['telegram']['chat_id']
+domains = config.get('domains', [])
+
+# 构建每日报告
+message = "📅 <b>域名监控每日报告</b>\n\n"
+message += f"📆 <b>日期:</b> {datetime.now().strftime('%Y-%m-%d')}\n"
+message += f"⏰ <b>时间:</b> {datetime.now().strftime('%H:%M:%S')}\n"
+message += f"📊 <b>监控域名数:</b> {len(domains)}\n\n"
+
+available_count = 0
+registered_count = 0
+
+message += "<b>📋 域名状态汇总:</b>\n"
+
+for domain in domains:
+    if domain in history:
+        last_status = history[domain].get('last_status', 'unknown')
+        
+        if last_status == 'available':
+            available_count += 1
+            emoji = "🟢"
+        elif last_status == 'registered':
+            registered_count += 1
+            emoji = "🔴"
+        else:
+            emoji = "⚠️"
+            
+        message += f"\n{emoji} <code>{domain}</code>"
+
+message += f"\n\n<b>📊 统计信息:</b>\n"
+message += f"🟢 可注册: {available_count} 个\n"
+message += f"🔴 已注册: {registered_count} 个\n"
+
+message += f"\n<b>⚙️ 系统状态:</b>\n"
+message += f"✅ 监控服务: 正常运行\n"
+message += f"🔄 检查间隔: {config.get('check_interval', 300)} 秒"
+
+# 发送消息
+url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+data = {
+    "chat_id": chat_id,
+    "text": message,
+    "parse_mode": "HTML",
+    "disable_web_page_preview": True
+}
+
+try:
+    response = requests.post(url, json=data, timeout=10)
+    if response.status_code == 200:
+        print("✓ 每日报告发送成功")
+except Exception as e:
+    print(f"✗ 错误: {e}")
+EOF
+
+    chmod +x "$INSTALL_DIR/daily_report.py"
+    
+    # 添加到 crontab
+    (crontab -l 2>/dev/null | grep -v "daily_report.py"; echo "0 9 * * * $INSTALL_DIR/venv/bin/python $INSTALL_DIR/daily_report.py >> $INSTALL_DIR/logs/daily_report.log 2>&1") | crontab -
+    
+    echo -e "${GREEN}✓ 每日报告已设置（每天 9:00 发送）${NC}"
 }
 
 # 查看日志
@@ -382,23 +650,36 @@ update_program() {
     
     # 下载最新版本
     echo -e "${CYAN}下载最新版本...${NC}"
-    curl -sSL "https://raw.githubusercontent.com/everett7623/domainmonitor/main/domainmonitor.py" -o domainmonitor.py.new
-    curl -sSL "https://raw.githubusercontent.com/everett7623/domainmonitor/main/domainctl.sh" -o domainctl.sh.new
     
     # 备份当前版本
     cp domainmonitor.py domainmonitor.py.bak
     cp domainctl.sh domainctl.sh.bak
     
-    # 替换文件
-    mv domainmonitor.py.new domainmonitor.py
-    mv domainctl.sh.new domainctl.sh
-    chmod +x domainmonitor.py domainctl.sh
-    
-    echo -e "${GREEN}✓ 更新完成${NC}"
-    
-    # 重启服务
-    if systemctl is-active --quiet $SERVICE_NAME; then
-        restart_service
+    # 下载新版本
+    if curl -sSL "https://raw.githubusercontent.com/everett7623/domainmonitor/main/domainmonitor.py" -o domainmonitor.py.new &&
+       curl -sSL "https://raw.githubusercontent.com/everett7623/domainmonitor/main/domainctl.sh" -o domainctl.sh.new; then
+        
+        # 检查文件是否有效
+        if grep -q "404" domainmonitor.py.new || [ ! -s domainmonitor.py.new ]; then
+            echo -e "${RED}✗ 下载失败，保留当前版本${NC}"
+            rm -f domainmonitor.py.new domainctl.sh.new
+            exit 1
+        fi
+        
+        # 替换文件
+        mv domainmonitor.py.new domainmonitor.py
+        mv domainctl.sh.new domainctl.sh
+        chmod +x domainmonitor.py domainctl.sh
+        
+        echo -e "${GREEN}✓ 更新完成${NC}"
+        
+        # 重启服务
+        if systemctl is-active --quiet $SERVICE_NAME; then
+            restart_service
+        fi
+    else
+        echo -e "${RED}✗ 更新失败${NC}"
+        exit 1
     fi
 }
 
@@ -424,6 +705,9 @@ uninstall_program() {
     
     # 删除软链接
     rm -f /usr/local/bin/domainctl
+    
+    # 删除 crontab
+    crontab -l 2>/dev/null | grep -v "daily_report.py" | crontab -
     
     # 删除安装目录
     rm -rf "$INSTALL_DIR"
@@ -459,6 +743,18 @@ main() {
             ;;
         check)
             check_now
+            ;;
+        test)
+            test_domain "$2"
+            ;;
+        interval)
+            change_interval "$2"
+            ;;
+        report)
+            send_report
+            ;;
+        daily)
+            setup_daily
             ;;
         logs|log)
             view_logs "$2" "$3"

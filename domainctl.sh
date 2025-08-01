@@ -219,25 +219,26 @@ add_domain() {
     fi
     
     # 添加域名到配置
-    $PYTHON_CMD << EOF
+    output=$($PYTHON_CMD << 'EOF' 2>&1
 import json
 config_file = "$CONFIG_FILE"
 domain = "$domain"
 
-with open(config_file, 'r') as f:
-    config = json.load(f)
+try:
+    with open(config_file, 'r') as f:
+        config = json.load(f)
 
-if domain in config['domains']:
-    print("EXISTS")
-else:
-    config['domains'].append(domain)
-    with open(config_file, 'w') as f:
-        json.dump(config, f, indent=4)
-    print("ADDED")
+    if domain in config['domains']:
+        print("EXISTS")
+    else:
+        config['domains'].append(domain)
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=4)
+        print("ADDED")
+except Exception as e:
+    print(f"ERROR: {e}")
 EOF
-
-    result=$?
-    output=$($PYTHON_CMD << EOF 2>&1
+)
 import json
 config_file = "$CONFIG_FILE"
 domain = "$domain"
@@ -326,13 +327,13 @@ list_domains() {
         exit 1
     fi
     
-    domains=$($PYTHON_CMD << EOF 2>/dev/null
+    domains=$($PYTHON_CMD << PYEOF 2>/dev/null
 import json
-with open("$CONFIG_FILE", 'r') as f:
+with open("${CONFIG_FILE}", 'r') as f:
     config = json.load(f)
     for i, domain in enumerate(config['domains'], 1):
         print(f"{i}. {domain}")
-EOF
+PYEOF
 )
     
     if [[ -z "$domains" ]]; then
@@ -359,13 +360,13 @@ check_domain() {
     print_info "正在检查域名: $domain"
     
     # 使用 Python 脚本检查域名
-    $PYTHON_CMD << EOF
+    $PYTHON_CMD << PYEOF
 import sys
-sys.path.insert(0, "$INSTALL_DIR")
+sys.path.insert(0, "${INSTALL_DIR}")
 from domain_monitor import DomainMonitor
 
 monitor = DomainMonitor()
-result = monitor.check_domain("$domain")
+result = monitor.check_domain("${domain}")
 
 print(f"\\n状态: {result['status'].upper()}")
 if result['status'] == 'registered':
@@ -379,7 +380,7 @@ elif result['status'] == 'available':
     print("\\n✅ 域名可以注册！")
 elif result['status'] == 'unknown':
     print(f"错误: {result.get('error', '未知错误')}")
-EOF
+PYEOF
 }
 
 # 生成报告
@@ -391,12 +392,12 @@ generate_report() {
     echo
     
     # 使用 Python 生成报告
-    $PYTHON_CMD << EOF
+    $PYTHON_CMD << PYEOF
 import json
 import os
 from datetime import datetime
 
-config_file = "$CONFIG_FILE"
+config_file = "${CONFIG_FILE}"
 history_file = "${INSTALL_DIR}/data/history.json"
 
 # 加载配置
@@ -458,7 +459,7 @@ if expiring_soon:
     print("⚠️  即将到期的域名:")
     for domain, days in sorted(expiring_soon, key=lambda x: x[1]):
         print(f"   • {domain} - {days} 天")
-EOF
+PYEOF
     
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
 }
@@ -474,17 +475,17 @@ show_config() {
         exit 1
     fi
     
-    $PYTHON_CMD << EOF
+    $PYTHON_CMD << PYEOF
 import json
 
-with open("$CONFIG_FILE", 'r') as f:
+with open("${CONFIG_FILE}", 'r') as f:
     config = json.load(f)
     
 print(f"Telegram Bot Token: {'*' * 10 + config['telegram']['bot_token'][-10:]}")
 print(f"Telegram Chat ID: {config['telegram']['chat_id']}")
 print(f"检查间隔: {config['check_interval']} 秒 ({config['check_interval']//60} 分钟)")
 print(f"监控域名数: {len(config['domains'])}")
-EOF
+PYEOF
     
     echo -e "${CYAN}═══════════════════════════════════════${NC}"
     echo -e "${WHITE}配置文件: $CONFIG_FILE${NC}"

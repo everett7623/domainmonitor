@@ -103,7 +103,56 @@ dnspython==2.4.2
 requests==2.31.0
 EOF
     
-    pip3 install -r /tmp/requirements.txt
+    # 检测系统类型并选择合适的安装方法
+    if [[ -f /etc/debian_version ]]; then
+        # Debian/Ubuntu 系统
+        print_info "检测到 Debian/Ubuntu 系统"
+        
+        # 检查是否可以使用 apt 安装
+        if command -v apt &> /dev/null; then
+            print_info "尝试使用 apt 安装 Python 包..."
+            apt-get update &> /dev/null
+            apt-get install -y python3-pip python3-venv &> /dev/null || true
+        fi
+        
+        # 使用虚拟环境
+        print_info "创建 Python 虚拟环境..."
+        python3 -m venv ${INSTALL_DIR}/venv
+        
+        # 激活虚拟环境并安装依赖
+        source ${INSTALL_DIR}/venv/bin/activate
+        pip install --upgrade pip &> /dev/null
+        pip install -r /tmp/requirements.txt
+        deactivate
+        
+        # 创建 Python 包装脚本
+        cat > ${INSTALL_DIR}/python_wrapper.sh << 'EOFWRAPPER'
+#!/bin/bash
+source /opt/domainmonitor/venv/bin/activate
+exec python "$@"
+EOFWRAPPER
+        chmod +x ${INSTALL_DIR}/python_wrapper.sh
+        
+    elif [[ -f /etc/redhat-release ]]; then
+        # RedHat/CentOS 系统
+        print_info "检测到 RedHat/CentOS 系统"
+        
+        # 使用 pip3 的 --user 选项
+        pip3 install --user -r /tmp/requirements.txt
+        
+    else
+        # 其他系统，尝试使用 --break-system-packages
+        print_info "使用 pip3 安装（忽略系统包警告）..."
+        
+        # 检查 pip 版本是否支持 --break-system-packages
+        if pip3 install --help | grep -q "break-system-packages"; then
+            pip3 install --break-system-packages -r /tmp/requirements.txt
+        else
+            # 旧版本 pip，使用 --user
+            pip3 install --user -r /tmp/requirements.txt
+        fi
+    fi
+    
     rm -f /tmp/requirements.txt
     
     print_success "依赖包安装完成"
@@ -168,6 +217,13 @@ EOF
 create_service() {
     print_info "创建系统服务..."
     
+    # 检查是否使用虚拟环境
+    if [[ -f ${INSTALL_DIR}/venv/bin/python ]]; then
+        PYTHON_EXEC="${INSTALL_DIR}/venv/bin/python"
+    else
+        PYTHON_EXEC="/usr/bin/python3"
+    fi
+    
     cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
 [Unit]
 Description=Domain Monitor Service
@@ -177,7 +233,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=/usr/bin/python3 ${INSTALL_DIR}/domain_monitor.py
+ExecStart=${PYTHON_EXEC} ${INSTALL_DIR}/domain_monitor.py
 Restart=always
 RestartSec=10
 StandardOutput=append:${INSTALL_DIR}/logs/monitor.log

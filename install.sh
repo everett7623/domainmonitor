@@ -259,19 +259,143 @@ init_domains() {
     if [[ "$add_now" == "y" || "$add_now" == "Y" ]]; then
         echo -e "${WHITE}请输入要监控的域名（每行一个，输入空行结束）：${NC}"
         
+        # 确保 domainctl 脚本存在并有执行权限
+        if [[ ! -f /usr/local/bin/domainctl ]]; then
+            print_error "管理脚本未找到，跳过域名添加"
+            return
+        fi
+        
         domains=()
         while true; do
             read -p "> " domain
             if [[ -z "$domain" ]]; then
                 break
             fi
-            domains+=("$domain")
+            # 验证域名格式
+            if echo "$domain" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*
+
+# 显示安装信息
+show_installation_info() {
+    echo
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║        安装成功！                        ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo
+    echo -e "${CYAN}安装信息：${NC}"
+    echo -e "${WHITE}• 安装目录: ${INSTALL_DIR}${NC}"
+    echo -e "${WHITE}• 配置文件: ${INSTALL_DIR}/config.json${NC}"
+    echo -e "${WHITE}• 日志目录: ${INSTALL_DIR}/logs${NC}"
+    echo -e "${WHITE}• 管理命令: domainctl${NC}"
+    echo
+    echo -e "${CYAN}常用命令：${NC}"
+    echo -e "${WHITE}• 查看状态: domainctl status${NC}"
+    echo -e "${WHITE}• 添加域名: domainctl add example.com${NC}"
+    echo -e "${WHITE}• 删除域名: domainctl remove example.com${NC}"
+    echo -e "${WHITE}• 域名列表: domainctl list${NC}"
+    echo -e "${WHITE}• 查看日志: domainctl logs${NC}"
+    echo -e "${WHITE}• 启动服务: domainctl start${NC}"
+    echo -e "${WHITE}• 停止服务: domainctl stop${NC}"
+    echo
+    echo -e "${YELLOW}提示：${NC}"
+    echo -e "${WHITE}• 使用 'domainctl help' 查看所有可用命令${NC}"
+    echo -e "${WHITE}• 配置文件中可以修改检查间隔时间${NC}"
+    echo -e "${WHITE}• 日志文件会自动轮转，无需手动清理${NC}"
+    echo
+}
+
+# 主安装流程
+main() {
+    clear
+    print_banner
+    
+    print_info "开始安装 Domain Monitor..."
+    echo
+    
+    # 执行安装步骤
+    check_requirements
+    install_dependencies
+    create_directories
+    download_files
+    configure_telegram
+    create_service
+    init_domains
+    
+    # 启动服务
+    print_info "启动服务..."
+    systemctl start ${SERVICE_NAME}
+    
+    if systemctl is-active --quiet ${SERVICE_NAME}; then
+        print_success "服务启动成功"
+    else
+        print_error "服务启动失败，请检查日志"
+        echo -e "${YELLOW}查看日志: journalctl -u ${SERVICE_NAME} -f${NC}"
+    fi
+    
+    # 显示安装信息
+    show_installation_info
+}
+
+# 错误处理
+trap 'print_error "安装过程中发生错误"; exit 1' ERR
+
+# 运行主函数
+main; then
+                domains+=("$domain")
+            else
+                print_warning "无效的域名格式: $domain (跳过)"
+            fi
         done
         
         if [[ ${#domains[@]} -gt 0 ]]; then
+            # 先启动服务（如果还未启动）
+            if ! systemctl is-active --quiet ${SERVICE_NAME}; then
+                systemctl start ${SERVICE_NAME} 2>/dev/null || true
+                sleep 2
+            fi
+            
+            # 添加域名
             for domain in "${domains[@]}"; do
-                /usr/local/bin/domainctl add "$domain"
+                print_info "添加域名: $domain"
+                # 直接修改配置文件，避免调用可能有问题的 domainctl
+                if [[ -f ${INSTALL_DIR}/venv/bin/python ]]; then
+                    ${INSTALL_DIR}/venv/bin/python -c "
+import json
+config_file = '${CONFIG_FILE}'
+domain = '${domain}'
+with open(config_file, 'r') as f:
+    config = json.load(f)
+if domain not in config['domains']:
+    config['domains'].append(domain)
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=4)
+    print('已添加')
+else:
+    print('已存在')
+" 2>/dev/null && print_success "添加成功: $domain" || print_warning "添加失败: $domain"
+                else
+                    python3 -c "
+import json
+config_file = '${CONFIG_FILE}'
+domain = '${domain}'
+with open(config_file, 'r') as f:
+    config = json.load(f)
+if domain not in config['domains']:
+    config['domains'].append(domain)
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=4)
+    print('已添加')
+else:
+    print('已存在')
+" 2>/dev/null && print_success "添加成功: $domain" || print_warning "添加失败: $domain"
+                fi
             done
+            
+            # 重启服务以应用更改
+            if systemctl is-active --quiet ${SERVICE_NAME}; then
+                print_info "重启服务以应用更改..."
+                systemctl restart ${SERVICE_NAME}
+            fi
+            
             print_success "已添加 ${#domains[@]} 个域名"
         fi
     fi

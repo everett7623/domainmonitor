@@ -21,6 +21,13 @@ CONFIG_FILE="${INSTALL_DIR}/config.json"
 SERVICE_NAME="domainmonitor"
 LOG_FILE="${INSTALL_DIR}/logs/monitor.log"
 
+# 检测 Python 可执行文件
+if [[ -f ${INSTALL_DIR}/venv/bin/python ]]; then
+    PYTHON_CMD="${INSTALL_DIR}/venv/bin/python"
+else
+    PYTHON_CMD="python3"
+fi
+
 # 检查权限
 check_permission() {
     if [[ $EUID -ne 0 ]]; then
@@ -160,8 +167,8 @@ show_status() {
     
     # 配置信息
     if [[ -f "$CONFIG_FILE" ]]; then
-        domain_count=$(python3 -c "import json; print(len(json.load(open('$CONFIG_FILE'))['domains']))" 2>/dev/null || echo "0")
-        check_interval=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE'))['check_interval'])" 2>/dev/null || echo "3600")
+        domain_count=$($PYTHON_CMD -c "import json; print(len(json.load(open('$CONFIG_FILE'))['domains']))" 2>/dev/null || echo "0")
+        check_interval=$($PYTHON_CMD -c "import json; print(json.load(open('$CONFIG_FILE'))['check_interval'])" 2>/dev/null || echo "3600")
         interval_min=$((check_interval / 60))
         
         echo -e "${WHITE}● 监控域名: ${domain_count} 个${NC}"
@@ -212,7 +219,7 @@ add_domain() {
     fi
     
     # 添加域名到配置
-    python3 << EOF
+    $PYTHON_CMD << EOF
 import json
 config_file = "$CONFIG_FILE"
 domain = "$domain"
@@ -230,7 +237,7 @@ else:
 EOF
 
     result=$?
-    output=$(python3 << EOF 2>&1
+    output=$($PYTHON_CMD << EOF 2>&1
 import json
 config_file = "$CONFIG_FILE"
 domain = "$domain"
@@ -275,7 +282,7 @@ remove_domain() {
     fi
     
     # 从配置中删除域名
-    output=$(python3 << EOF 2>&1
+    output=$($PYTHON_CMD << EOF 2>&1
 import json
 config_file = "$CONFIG_FILE"
 domain = "$domain"
@@ -319,7 +326,7 @@ list_domains() {
         exit 1
     fi
     
-    domains=$(python3 << EOF 2>/dev/null
+    domains=$($PYTHON_CMD << EOF 2>/dev/null
 import json
 with open("$CONFIG_FILE", 'r') as f:
     config = json.load(f)
@@ -352,7 +359,7 @@ check_domain() {
     print_info "正在检查域名: $domain"
     
     # 使用 Python 脚本检查域名
-    python3 << EOF
+    $PYTHON_CMD << EOF
 import sys
 sys.path.insert(0, "$INSTALL_DIR")
 from domain_monitor import DomainMonitor
@@ -384,7 +391,7 @@ generate_report() {
     echo
     
     # 使用 Python 生成报告
-    python3 << EOF
+    $PYTHON_CMD << EOF
 import json
 import os
 from datetime import datetime
@@ -467,7 +474,7 @@ show_config() {
         exit 1
     fi
     
-    python3 << EOF
+    $PYTHON_CMD << EOF
 import json
 
 with open("$CONFIG_FILE", 'r') as f:

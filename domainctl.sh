@@ -432,16 +432,23 @@ check_now() {
     print_message "🔍 立即检查所有域名" "$CYAN"
     print_separator
     
-    python3 "$INSTALL_DIR/domain_monitor.py" --check-once 2>/dev/null || {
-        # 如果没有 --check-once 参数，发送信号触发检查
-        PID=$(systemctl show -p MainPID --value $SERVICE_NAME)
-        if [[ -n "$PID" ]] && [[ "$PID" != "0" ]]; then
-            kill -USR1 "$PID" 2>/dev/null
-            print_message "✅ 已触发域名检查" "$GREEN"
-        else
-            print_message "❌ 服务未运行，请先启动服务" "$RED"
-        fi
-    }
+    # 停止服务，运行单次检查，然后重启服务
+    print_message "⏸️  暂停定时服务..." "$BLUE"
+    systemctl stop $SERVICE_NAME
+    
+    print_message "🔍 执行域名检查..." "$BLUE"
+    cd $INSTALL_DIR
+    timeout 60 python3 domain_monitor.py 2>&1 | head -n 50 &
+    
+    sleep 5
+    pkill -f "python3 domain_monitor.py" 2>/dev/null
+    
+    print_message "▶️  重启定时服务..." "$BLUE"
+    systemctl start $SERVICE_NAME
+    
+    print_message "✅ 检查完成，请查看日志或Telegram通知" "$GREEN"
+    echo
+    print_message "查看日志: domainctl logs" "$YELLOW"
 }
 
 # 显示帮助

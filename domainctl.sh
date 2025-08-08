@@ -432,23 +432,32 @@ check_now() {
     print_message "🔍 立即检查所有域名" "$CYAN"
     print_separator
     
-    # 停止服务，运行单次检查，然后重启服务
-    print_message "⏸️  暂停定时服务..." "$BLUE"
-    systemctl stop $SERVICE_NAME
+    print_message "📡 触发域名检查..." "$BLUE"
     
-    print_message "🔍 执行域名检查..." "$BLUE"
-    cd $INSTALL_DIR
-    timeout 60 python3 domain_monitor.py 2>&1 | head -n 50 &
+    # 创建临时Python脚本进行单次检查
+    cat > /tmp/check_domains.py << 'EOF'
+#!/usr/bin/env python3
+import sys
+sys.path.insert(0, '/opt/domainmonitor')
+from domain_monitor import DomainMonitor
+monitor = DomainMonitor()
+monitor.check_all_domains()
+EOF
     
-    sleep 5
-    pkill -f "python3 domain_monitor.py" 2>/dev/null
+    chmod +x /tmp/check_domains.py
     
-    print_message "▶️  重启定时服务..." "$BLUE"
-    systemctl start $SERVICE_NAME
+    # 执行检查
+    cd /opt/domainmonitor
+    python3 /tmp/check_domains.py
     
-    print_message "✅ 检查完成，请查看日志或Telegram通知" "$GREEN"
+    rm -f /tmp/check_domains.py
+    
+    print_message "✅ 域名检查完成" "$GREEN"
     echo
-    print_message "查看日志: domainctl logs" "$YELLOW"
+    print_message "💡 提示：" "$YELLOW"
+    print_message "  • 如果域名可注册，您会收到Telegram通知" "$WHITE"
+    print_message "  • 查看详细日志: domainctl logs" "$WHITE"
+    print_message "  • 查看域名状态: domainctl list" "$WHITE"
 }
 
 # 显示帮助
@@ -468,6 +477,7 @@ show_help() {
     echo -e "  ${YELLOW}remove <domain>${NC}     删除监控域名"
     echo -e "  ${YELLOW}list${NC}                列出所有域名"
     echo -e "  ${YELLOW}check${NC}               立即检查所有域名"
+    echo -e "  ${YELLOW}reset${NC}               重置通知状态"
     echo
     echo -e "${WHITE}日志查看:${NC}"
     echo -e "  ${YELLOW}logs [lines]${NC}        查看日志 (默认50行)"
@@ -487,6 +497,7 @@ show_help() {
     echo -e "  ${WHITE}domainctl add example.com${NC}"
     echo -e "  ${WHITE}domainctl remove example.com${NC}"
     echo -e "  ${WHITE}domainctl logs 100${NC}"
+    echo -e "  ${WHITE}domainctl check${NC}"
 }
 
 # 更新系统
@@ -552,6 +563,45 @@ uninstall_system() {
     fi
 }
 
+# 重置通知状态
+reset_notifications() {
+    print_header
+    print_message "🔄 重置通知状态" "$CYAN"
+    print_separator
+    
+    print_message "📝 此操作将重置所有域名的通知状态" "$YELLOW"
+    print_message "   可以重新接收已发送过的通知" "$YELLOW"
+    echo
+    
+    read -p "$(echo -e ${WHITE}"确定要重置吗？(y/N): "${NC})" CONFIRM
+    
+    if [[ "$CONFIRM" == "y" ]] || [[ "$CONFIRM" == "Y" ]]; then
+        # 重置历史文件中的通知标记
+        python3 -c "
+import json
+import os
+
+history_file = '$DATA_DIR/domain_history.json'
+if os.path.exists(history_file):
+    with open(history_file, 'r') as f:
+        history = json.load(f)
+    
+    for domain in history:
+        history[domain]['notification_sent'] = False
+    
+    with open(history_file, 'w') as f:
+        json.dump(history, f, indent=4)
+    
+    print('✅ 通知状态已重置')
+else:
+    print('⚠️ 暂无历史记录')
+"
+        print_message "✅ 重置完成，下次检查时会重新发送通知" "$GREEN"
+    else
+        print_message "❌ 操作已取消" "$YELLOW"
+    fi
+}
+
 # 主函数
 main() {
     case "$1" in
@@ -597,6 +647,9 @@ main() {
             ;;
         check)
             check_now
+            ;;
+        reset)
+            reset_notifications
             ;;
         update)
             update_system

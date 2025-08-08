@@ -1,29 +1,35 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Domain Monitor - 监控历史</title>
+    <title>Domain Monitor - 监控面板</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-        h1 { text-align: center; color: #2c3e50; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        h1 { text-align: center; color: #2c3e50; border-bottom: 2px solid #ecf0f1; padding-bottom: 15px; margin-bottom: 25px; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
-        th { background-color: #ecf0f1; }
+        th, td { padding: 12px 15px; border: 1px solid #ddd; text-align: left; word-wrap: break-word; }
+        th { background-color: #3498db; color: white; font-weight: bold; }
         tr:nth-child(even) { background-color: #f9f9f9; }
-        .status-available { color: #2ecc71; font-weight: bold; }
-        .status-registered { color: #e74c3c; }
-        .status-error { color: #f39c12; }
+        tr:hover { background-color: #f1f1f1; }
+        .status { font-weight: bold; padding: 5px 8px; border-radius: 4px; color: white; text-align: center; display: inline-block; min-width: 80px;}
+        .status-available { background-color: #2ecc71; } /* 绿色 */
+        .status-registered { background-color: #e74c3c; } /* 红色 */
+        .status-error { background-color: #f39c12; } /* 橙色 */
+        .footer { text-align: center; margin-top: 30px; font-size: 0.9em; color: #7f8c8d; }
+        .footer a { color: #3498db; text-decoration: none; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>域名监控历史记录</h1>
+        {% if not logs %}
+        <p style="text-align:center; color: #7f8c8d;">暂无监控记录。请确保主监控脚本正在运行，并已成功检测至少一次。</p>
+        {% else %}
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>域名</th>
                     <th>状态</th>
                     <th>详情</th>
@@ -33,19 +39,24 @@
             <tbody>
                 {% for log in logs %}
                 <tr>
-                    <td>{{ log['id'] }}</td>
-                    <td>{{ log['domain_name'] }}</td>
-                    <td class="
-                        {% if '可注册' in log['status'] %}status-available
-                        {% elif '已注册' in log['status'] %}status-registered
-                        {% else %}status-error{% endif %}
-                    ">{{ log['status'] }}</td>
+                    <td><strong>{{ log['domain_name'] }}</strong></td>
+                    <td>
+                        <span class="status
+                            {% if '可注册' in log['status'] %}status-available
+                            {% elif '已注册' in log['status'] %}status-registered
+                            {% else %}status-error{% endif %}
+                        ">{{ log['status'].split('(')[0].strip() }}</span>
+                    </td>
                     <td>{{ log['details'] }}</td>
                     <td>{{ log['check_time'] }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        {% endif %}
+    </div>
+    <div class="footer">
+        <p>Powered by <a href="https://github.com/everett7623/domainmonitor" target="_blank">domainmonitor</a></p>
     </div>
 </body>
 </html>

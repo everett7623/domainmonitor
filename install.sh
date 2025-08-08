@@ -262,11 +262,19 @@ start_service() {
     
     systemctl start ${SERVICE_NAME}.service
     
+    # 等待服务启动
+    sleep 3
+    
     if systemctl is-active --quiet ${SERVICE_NAME}.service; then
         print_message "✅ 服务启动成功" "$GREEN"
+        
+        # 显示最新日志
+        print_message "📄 最新日志:" "$CYAN"
+        tail -n 10 $LOG_DIR/monitor.log 2>/dev/null || echo "等待日志生成..."
     else
         print_message "❌ 服务启动失败，请检查日志" "$RED"
-        print_message "查看日志: journalctl -u ${SERVICE_NAME} -f" "$YELLOW"
+        print_message "查看日志: journalctl -u ${SERVICE_NAME} -n 50" "$YELLOW"
+        print_message "或: tail -n 50 $LOG_DIR/monitor.log" "$YELLOW"
     fi
 }
 

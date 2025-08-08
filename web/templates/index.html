@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Domain Monitor - 监控历史</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        h1 { text-align: center; color: #2c3e50; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #ecf0f1; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .status-available { color: #2ecc71; font-weight: bold; }
+        .status-registered { color: #e74c3c; }
+        .status-error { color: #f39c12; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>域名监控历史记录</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>域名</th>
+                    <th>状态</th>
+                    <th>详情</th>
+                    <th>检测时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log['id'] }}</td>
+                    <td>{{ log['domain_name'] }}</td>
+                    <td class="
+                        {% if '可注册' in log['status'] %}status-available
+                        {% elif '已注册' in log['status'] %}status-registered
+                        {% else %}status-error{% endif %}
+                    ">{{ log['status'] }}</td>
+                    <td>{{ log['details'] }}</td>
+                    <td>{{ log['check_time'] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
